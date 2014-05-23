@@ -1,13 +1,14 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE ExistentialQuantification #-} 
 {-# LANGUAGE RankNTypes #-}
-module Operation (Tablename, ErrString, LogString, Database, Fieldname, Table, Column, create_table, drop_table, alter_table_add, alter_table_drop, select, Operation.insert, Operation.update, Operation.delete, show_tables) where
+module Operation (create_table, drop_table, alter_table_add, alter_table_drop, select, Operation.insert, Operation.update, Operation.delete, show_tables) where
 
 import System.IO
 import Control.Monad
 import Control.Concurrent
 import Control.Concurrent.STM
 import Data.Map.Lazy
+
 {- First stab at the interface -}
 -- Note that this means that you'll have to keep track of the type 
 -- for each table/col combo outside of this module since you need to 
@@ -15,41 +16,49 @@ import Data.Map.Lazy
 -- inserts, for example. This means lookups on some Fieldname a should
 -- never fail, but this module will handle the case when it does.
 
-newtype Tablename = Tablename String deriving(Show)
-newtype ErrString = ErrString String deriving(Show)
-newtype LogString  = LogString String deriving(Show)
+constructTableMap :: (forall a. [(Fieldname a, Maybe a)]) -> Map (Fieldname a) (Column a)
+-> Map (Fieldname a) (Column a)
+constructTableMap (Fieldname a, b):xs old_map = let col = Tvar empty 
+  in constructTableMap xs (insert (Fieldname a) (Column {default_val=b, column=col})) 
+constructTableMap _ old_map = old_map
 
-data Database = Database (Map Tablename (TVar Table))
-data Fieldname a = Fieldname String a
-data Table = forall a. (Show a, Ord a) => Table (Map (Fieldname a) (Column a))
-data Column a = Column (Maybe a) (TVar([Element a])) -- first element is default value
-data Element a = Element (TVar a)
+create_table :: TVar Database -> Tablename -> (forall a. [(Fieldname a, Maybe a])) -> Maybe (Fieldname b) -> STM ((Either ErrString) LogOperation)
+create_table db tablename field_and_col primary_key = do
+  hmdb <- readTVar db
+  -- TODO: first check that we've been given a valid primary key
+  case lookup tablename (database hmdb) of 
+    Just x -> do let table_map = constructTableMap field_and_col empty 
+                 insert tablename Table{primaryKey=primary_key, table=table_map}  (database hmdb)
+    Nothing -> return ErrString (show(tablename) ++ " already exists.")
 
-create_table :: TVar Database -> Tablename -> (forall a. [(Fieldname a, Column a)]) -> Maybe (Fieldname b) -> STM (IO ErrString, IO LogString)
-create_table db tablename field_and_col primary_key = return (return (ErrString ""), return (LogString ""))
+drop_table :: TVar Database -> Tablename -> STM (Either (ErrString) LogOperation)
+drop_table db tablename = do 
+  hmdb <- readTVar db
+  case lookup tablename (database hmdb) of 
+    Just x -> do writeTvar db  (delete tablename (database hmdb))
+                 return DropTable tablename  
+    Nothing -> return ErrString (show(tablename) ++ " not found.")    
 
-drop_table :: TVar Database -> String -> STM (IO ErrString, IO LogString)
-drop_table db tablename = return (return (ErrString ""), return (LogString ""))
+alter_table_add :: TVar Database -> String -> Fieldname a -> STM (Either (ErrString) LogOperation) 
+alter_table_add db tablename fieldname =
 
-alter_table_add :: TVar Database -> String -> Fieldname a -> STM (IO ErrString, IO LogString) 
-alter_table_add db tablename fieldname = return (return (ErrString ""), return (LogString "")) 
+alter_table_drop :: TVar Database -> String -> String -> STM (Either (ErrString) LogOperation)
+alter_table_drop db tablename fieldname = 
 
-alter_table_drop :: TVar Database -> String -> String -> STM (IO ErrString, IO LogString) 
-alter_table_drop db tablename fieldname = return (return (ErrString ""), return (LogString ""))
+-- String is readable into list of tuples 
+select :: TVar Database -> (forall a. [(Fieldname a, (a -> Bool))]) -> Tablename -> STM(Either (ErrString) (LogOperation, IO String)) -- last string is the stuff user queried for
+select db fieldnames_and_conds tablename =  
 
-select :: TVar Database -> (forall a. [(Fieldname a, (a -> Bool))]) -> Tablename -> STM(IO ErrString, IO LogString, IO String) -- last string is the stuff user queried for
-select db fieldnames_and_conds tablename = return (return (ErrString ""), return (LogString ""), return "") 
+insert :: TVar Database -> Tablename -> (forall a. [(Fieldname a, a)]) -> STM(Either (ErrString) LogOperation) 
+insert db tablename fieldnames_and_vals =
 
-insert :: TVar Database -> Tablename -> (forall a. [(Fieldname a, a)]) -> STM(IO ErrString, IO LogString) 
-insert db tablename fieldnames_and_vals = return (return (ErrString ""), return (LogString ""))
-
-delete :: TVar Database -> Tablename -> (forall a. [(Fieldname a, (a -> Bool))]) -> STM(IO ErrString, IO LogString)
-delete db tablename filenames_and_conds = return (return (ErrString ""), return (LogString ""))   
-
-update :: TVar Database -> Tablename -> (forall a. [(Fieldname a, a, (a -> Bool))]) -> STM (IO ErrString, IO LogString)
-update db tablename filenames_vals_conds = return (return (ErrString ""), return (LogString ""))
-
-show_tables :: TVar Database -> STM (IO String) -- doesn't actually update the db, so no need for logstring
-show_tables db = return (return "") 
+delete :: TVar Database -> Tablename -> (forall a. [(Fieldname a, (a -> Bool))]) -> STM(Either (ErrString) LogOperation)
+delete db tablename filenames_and_conds =
+ 
+update :: TVar Database -> Tablename -> (forall a. [(Fieldname a, a, (a -> Bool))]) -> STM (ErrString, LogOperation)
+update db tablename filenames_vals_conds =
+ 
+show_tables :: TVar Database -> STM (String) -- doesn't actually update the db, so no need for logstring
+show_tables db =
 
 
