@@ -27,15 +27,15 @@ data TransactionID = TransactionID { clientName :: String
  
 newtype RowHash = RowHash Int deriving(Show, Read) 
 data LogOperation = Start TransactionID
-                  | forall a. (Show a, Ord a) => TransactionLog TransactionID (Tablename, Fieldname a, Rowhash) a a -- last two are old val, new val
+                  | forall a. (Show a, Ord a) => TransactionLog TransactionID (Tablename, Fieldname a, Rowhash) (Maybe a) (Maybe a) -- last two are old val, new val
                   | Commit TransactionID  
                   | StartCheckpoint [TransactionID]   
                   | EndCheckpoint 
-                  | DropTable Tablename 
-                  | CreateTable Tablename
-                  | AddField Tablename Fieldname
-                  | DropField Tablename Fieldname
-                  | SetPrimaryKey (Maybe Fieldname) (Maybe Fieldname) Tablename -- old field, new field
+                  | DropTable TransactionID Tablename 
+                  | CreateTable TransactionID Tablename
+                  | AddField TransactionID Tablename Fieldname
+                  | DropField TransactionID Tablename Fieldname
+                  | SetPrimaryKey TransactionID (Maybe Fieldname) (Maybe Fieldname) Tablename -- old field, new field
                   deriving (Show, Read) 
 
 
