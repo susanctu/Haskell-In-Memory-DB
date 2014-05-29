@@ -2,16 +2,18 @@
 {-# LANGUAGE ExistentialQuantification #-} 
 {-# LANGUAGE RankNTypes #-}
 
-module DBTypes (Tablename, ErrString, LogString, Database, Fieldname, Table, Column) where
+{- Exporting all types, constructors, and accessors -}
+module DBTypes (Tablename(..), ErrString(..), Database(..), Fieldname(..), Table(..), Column(..), Element(..), TransactionID(..), RowHash(..), LogOperation(..)) where
 
 import Control.Concurrent.STM
 import Data.Map.Lazy
  
-newtype Tablename = Tablename String deriving(Show)
+newtype Tablename = Tablename String deriving(Eq, Show)
 newtype ErrString = ErrString String deriving(Show)
 
 data Database = Database { database :: Map Tablename (TVar Table) }
-data Fieldname a = Fieldname { fieldname :: String }
+data Fieldname a = Fieldname { fieldname :: String } deriving(Eq, Show)
+
 data Table = forall a. (Show a, Ord a) => Table { primaryKey :: Maybe (Fieldname a) 
                                                 , table :: Map (Fieldname a) (Column a)}
 data Column a = Column { default_val :: Maybe a
@@ -21,7 +23,7 @@ data Element a = Element { elem :: TVar a }
 
 data TransactionID = TransactionID { clientName :: String 
                                    , transactionNum :: Int 
-                                   } deriving(Show, Read)-- clientname, transaction number
+                                   } deriving(Eq, Show, Read)-- clientname, transaction number
  
 newtype RowHash = RowHash Int deriving(Show, Read) 
 data LogOperation = Start TransactionID
@@ -30,6 +32,10 @@ data LogOperation = Start TransactionID
                   | StartCheckpoint [TransactionID]   
                   | EndCheckpoint 
                   | DropTable Tablename 
+                  | CreateTable Tablename
+                  | AddField Tablename Fieldname
+                  | DropField Tablename Fieldname
+                  | SetPrimaryKey (Maybe Fieldname) (Maybe Fieldname) Tablename -- old field, new field
                   deriving (Show, Read) 
 
 
