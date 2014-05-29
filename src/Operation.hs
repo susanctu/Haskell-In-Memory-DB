@@ -62,7 +62,7 @@ alter_table_add db tablename fieldname default_val is_primary_key = do
                                            modifyTvar x (set_primary_key t fieldname)
                                            return [add_op, SetPrimaryKey old_pk (Just fieldname) tablename]
                                    else return [add_op]
-                   Just f -> return ErrString (show(f) ++ "already exists in " ++ show(tablename)) 
+                   _ -> return ErrString (show(fieldname) ++ "already exists in " ++ show(tablename)) 
     Nothing -> return ErrString (show(tablename) ++ " not found.")    
 
 set_primary_key :: Table -> Fieldname a -> Table
@@ -74,7 +74,7 @@ alter_table_drop db tablename fieldname = do
   case tvar_table of 
     Just x -> do t <- readTVar x
                  case lookup fieldname (table t) of -- may have to unset primary key
-                   Just f -> do writeTvar x (delete fieldname t)
+                   _ -> do writeTvar x (delete fieldname t)
                                 let del_op = DeleteField fieldname tablename
                                 if (primaryKey t)==fieldname
                                   then do modifyTvar x (set_primary_key t Nothing)
@@ -94,15 +94,30 @@ select :: TVar Database -> (forall a. [(Fieldname a, (a -> Bool))]) -> Tablename
                    return ErrString (show(fieldname) ++ "does not exist in " ++ show(tablename)) 
     Nothing -> return ErrString (show(tablename) ++ " not found.") -}
 
-insert :: TVar Database -> Tablename -> (forall a. [(Fieldname a, a)]) -> STM(Either (ErrString) LogOperation) 
-insert db tablename fieldnames_and_vals =
+insert_vals :: TransactionID -> Tablename -> Table -> [(Fieldname a, a)] -> [LogOperation] -> Either (Fieldname a) (Table, [LogOperation])
+insert_vals tr_id tablename t (fieldname, val):xs logOps = case lookup fieldname (table t) of
+  Nothing -> fieldname
+  Just c -> insert_vals tr_id tablename (insert new_random_rowhash Element{elem=newTvar val} (column c)) xs (TransactionLog tr_id (tablename, fieldname, new_random_rowhash) Nothing (Just val)):logOps
+insert_vals t _ = t
+
+insert :: TVar Database -> TransactionID -> Tablename -> (forall a. [(Fieldname a, a)]) -> STM(Either (ErrString) [LogOperation]) 
+insert db tr_id tablename fieldnames_and_vals = do
+  tvar_table <- get_table db tablename
+  case tvar_table of 
+    Just x -> do t <- readTVar x
+                 case insert_vals tr_id tablename t fieldnames_and_vals [] of 
+                   Left fieldname -> return ErrString (show(fieldname) ++ " does not exist in " ++ show(tablenames)) 
+                   Right (new_t, logOps) -> do writeTvar x new_t
+                                               return logOps
+    Nothing -> return ErrString (show(tablename) ++ " not found.")    
+ 
 
 delete :: TVar Database -> Tablename -> (forall a. [(Fieldname a, (a -> Bool))]) -> STM(Either (ErrString) LogOperation)
 delete db tablename filenames_and_conds =
  
-update :: TVar Database -> Tablename -> (forall a. [(Fieldname a, a, (a -> Bool))]) -> STM (ErrString, LogOperation)
-update db tablename filenames_vals_conds =
- 
+update :: TVar Database -> Tablename -> (forall a. [(Fieldname a, a, (a -> Bool))]) -> STM (Either ErrString LogOperation)
+update db tablename fieldnames_vals_conds = 
+
 show_tables :: TVar Database -> STM (String) -- doesn't actually update the db, so no need for logstring
 show_tables db = do
   hmdb <- readTVar db
