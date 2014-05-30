@@ -16,10 +16,11 @@ data Fieldname a = Fieldname { fieldname :: String } deriving(Eq, Show)
 
 data Table = forall a. (Show a, Ord a) => Table { primaryKey :: Maybe (Fieldname a) 
                                                 , table :: Map (Fieldname a) (Column a)}
-data Column a = Column { default_val :: Maybe a
+data Column a = Column { default_val :: Maybe (Element a)
                        , column :: TVar(Map RowHash (Element a))
                        } -- first element is default value
-data Element a = Element { elem :: TVar a }
+
+data Element a = Element { element :: TVar (Maybe a) }
 
 data TransactionID = TransactionID { clientName :: String 
                                    , transactionNum :: Int 
