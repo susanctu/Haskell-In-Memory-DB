@@ -14,7 +14,8 @@ newtype ErrString = ErrString String deriving(Show)
 data Database = Database { database :: Map Tablename (TVar Table) }
 data Fieldname a = Fieldname { fieldname :: String } deriving(Eq, Show)
 
-data Table = forall a. (Show a, Ord a) => Table { primaryKey :: Maybe (Fieldname a) 
+data Table = forall a. (Show a, Ord a) => Table { rowCounter :: Int 
+                                                , primaryKey :: Maybe (Fieldname a) 
                                                 , table :: Map (Fieldname a) (Column a)}
 data Column a = Column { default_val :: Maybe (Element a)
                        , column :: TVar(Map RowHash (Element a))
