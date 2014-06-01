@@ -116,7 +116,7 @@ get_row_for_hash list_of_cols fieldname_to_col ignore_hashes hash = fmap (\m -> 
 {- Public -}
 -- Get the right columns, then filter columns individually, then create a set of rowhashes and output the rows that correspond to those rowhashes
 -- resulting String is readable into list of lists
-select :: TVar Database -> Tablename -> (forall a. [Fieldname a]) -> (forall b. [(Fieldname b, (b -> Bool))]) -> STM(Either (ErrString) [[String]]) -- last string is the stuff user queried for
+select :: TVar Database -> Tablename -> (forall a. [Fieldname a]) -> (Row -> Bool) -> STM(Either (ErrString) Table) -- last string is the stuff user queried for
 select db tablename show_fieldnames fieldnames_and_conds =  do
   tvar_table <- get_table db tablename
   case tvar_table of 
@@ -128,6 +128,8 @@ select db tablename show_fieldnames fieldnames_and_conds =  do
                                                                    in do list_of_lists <- sequence (map sequence list_of_rows) 
                                                                          return show(list_of_lists)
     Nothing -> return ErrString (show(tablename) ++ " not found.")
+
+join :: TVar Database -> Tablename -> Tablename -> (Row -> Row -> Bool) -> Table 
 
 insert_vals :: TransactionID -> RowHash -> Tablename -> Table -> (forall a. [(Fieldname a, a)]) -> (forall b. Set.Set (Fieldname b)) -> [LogOperation] -> Either (ErrString) (Table, [LogOperation])
 insert_vals tr_id rowhash tablename t (fieldname, val):xs seen_fieldnames logOps = if fieldname `member` seen_fieldnames
@@ -141,7 +143,7 @@ get_fields_with_defaults :: TVar Database ->
 
 -- remove RowHash, keep per-table counter
 insert :: TVar Database -> TransactionID -> Tablename -> (forall a. [(Fieldname a, a)]) -> STM(Either (ErrString) [LogOperation]) 
-insert db tr_id rowhash tablename fieldnames_and_vals = do
+insert db tr_id tablename fieldnames_and_vals = do
   tvar_table <- get_table db tablename
   case tvar_table of 
     Just x -> do t <- readTVar x -- t is of type Table
@@ -155,11 +157,11 @@ insert db tr_id rowhash tablename fieldnames_and_vals = do
  
 
 {- I do not plan on implementing these next two until I get everything else to compile -}
-delete :: TVar Database -> TransactionID -> Tablename -> (forall a. [(Fieldname a, (a -> Bool))]) -> STM(Either (ErrString) LogOperation)
+delete :: TVar Database -> TransactionID -> Tablename -> (Row -> Bool) -> STM(Either (ErrString) LogOperation)
 delete db tr_id tablename fieldnames_and_conds =
 
  
-update :: TVar Database -> TransactionID -> Tablename -> (forall a. [(Fieldname a, a -> a, (a -> Bool))]) -> STM (Either ErrString LogOperation)
+update :: TVar Database -> TransactionID -> Tablename -> (Row -> Bool) -> (Row -> Row) -> STM (Either ErrString LogOperation)
 update db tr_id tablename fieldnames_vals_conds = 
 
 show_tables :: TVar Database -> STM (String) -- doesn't actually update the db, so no need for logstring

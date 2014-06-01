@@ -27,6 +27,7 @@ data TransactionID = TransactionID { clientName :: String
                                    , transactionNum :: Int 
                                    } deriving(Eq, Show, Read)-- clientname, transaction number
  
+ data Row = Row {getField :: Fieldname a -> a}
 newtype RowHash = RowHash Int deriving(Show, Read) 
 data LogOperation = Start TransactionID
                   | forall a. (Show a, Ord a) => TransactionLog TransactionID (Tablename, Fieldname a, Rowhash) (Maybe a) (Maybe a) -- last two are old val, new val
