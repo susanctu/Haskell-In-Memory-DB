@@ -3,6 +3,7 @@
 {-# LANGUAGE RankNTypes #-}
 
 import Data.Typeable 
+import Data.Map.Lazy
 
 {- Exporting all types, constructors, and accessors -}
 module DBTypes (Tablename(..), ErrString(..), Database(..), Fieldname(..), Table(..), Column(..), Element(..), TransactionID(..), RowHash(..), LogOperation(..)) where
@@ -25,7 +26,7 @@ data Column = Column { default_val :: Maybe Element
                      , column :: TVar(Map RowHash Element)
                      } -- first element is default value
 
-data Element = forall a. Element { element :: TVar (Maybe a) }
+data Element = forall a. (Show a, Ord a) => Element { element :: TVar (Maybe a) }
 
 data TransactionID = TransactionID { clientName :: String 
                                    , transactionNum :: Int 
@@ -35,7 +36,7 @@ data Row = Row {getField :: Fieldname -> Maybe Element}
 
 newtype RowHash = RowHash Int deriving(Show, Read) 
 data LogOperation = Start TransactionID
-                  | forall a. (Show a, Ord a) => TransactionLog TransactionID (Tablename, Fieldname a, Rowhash) (Maybe a) (Maybe a) -- last two are old val, new val
+                  | forall a. (Show a, Ord a) => TransactionLog TransactionID (Tablename, Fieldname, Rowhash) (Maybe a) (Maybe a) -- last two are old val, new val
                   | Commit TransactionID  
                   | StartCheckpoint [TransactionID]   
                   | EndCheckpoint 
