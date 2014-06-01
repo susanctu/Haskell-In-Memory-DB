@@ -23,10 +23,10 @@ data Table = Table { rowCounter :: Int
 
 data Column = Column { default_val :: Maybe Element
                      , col_type :: TypeRep
-                     , column :: TVar(Map RowHash Element)
+                     , column :: TVar(Map RowHash (Tvar Element))
                      } -- first element is default value
 
-data Element = forall a. (Show a, Ord a) => Element { element :: TVar (Maybe a) }
+data Element = forall a. (Show a, Ord a) => Element { element :: (Maybe a) } -- Nothing here means that it's null
 
 data TransactionID = TransactionID { clientName :: String 
                                    , transactionNum :: Int 
@@ -36,7 +36,7 @@ data Row = Row {getField :: Fieldname -> Maybe Element}
 
 newtype RowHash = RowHash Int deriving(Show, Read) 
 data LogOperation = Start TransactionID
-                  | forall a. (Show a, Ord a) => TransactionLog TransactionID (Tablename, Fieldname, Rowhash) (Maybe a) (Maybe a) -- last two are old val, new val
+                  | forall a. (Show a, Ord a) => TransactionLog TransactionID (Tablename, Fieldname, Rowhash) (Maybe Element) (Maybe Element) -- last two are old val, new val
                   | Commit TransactionID  
                   | StartCheckpoint [TransactionID]   
                   | EndCheckpoint 

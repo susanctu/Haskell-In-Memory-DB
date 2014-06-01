@@ -128,26 +128,38 @@ select db tablename show_fieldnames fieldnames_and_conds =  do
 {-Public-}
 {- join :: TVar Database -> Tablename -> Tablename -> (Row -> Row -> Bool) -> Table -}
 
-{-Private: insert valuse int to the table, keeping track of what columns you have already
+{-Private: insert values int to the table, keeping track of what columns you have already
   inserted into in order to check that we are not inserting twice into the same column. Also
   collects and returns the appropriate LogOperations.
 -}
-insert_vals :: TransactionID -> RowHash -> Tablename -> Table -> [(Fieldname, Maybe Element)] -> Set.Set Fieldname -> [LogOperation] -> Either (ErrString) (Table, [LogOperation])
-insert_vals tr_id rowhash tablename t (fieldname, val):xs seen_fieldnames logOps = if fieldname `member` seen_fieldnames
-  then ("UNEXPECTED, DB may be in inconsistent state:" ++ show(fieldname) ++ " used twice in same insert into " ++ show(tablename)) 
-  else case lookup fieldname (table t) of
-         Nothing -> ("UNEXPECTED, DB may be in inconsistent state: " ++ show(fieldname) ++ " does not exist in " ++ show(tablenames))
-         Just c -> let new_logOp = TransactionLog tr_id (tablename, fieldname, rowhash) Nothing (Just val) 
-                     in do col_map <- readTVar $ column c
-                           new_elem <- construct_element val
-                           let new_col = Column (default_val c) (col_type c) (insert rowhash new_elem (col_map)) 
-                           let new_table = Table (rowCounter t) (primaryKey t) (insert fieldname new_col (table t))
-                           insert_vals tr_id tablename new_table xs (insert fieldname seen_fieldnames) new_logOp:logOps
+insert_vals :: TransactionID -> RowHash -> Tablename -> Table -> [Fieldnames] -> Row -> [LogOperation] -> Either (ErrString) (Table, [LogOperation])
+insert_vals tr_id rowhash tablename t f:fieldnames row logOps = 
+  case (getField row) f of 
+    Just new_elem -> do res <- insert_val_helper tr_id rowhash tablename t f new_elem
+                        case res of 
+                          Left str -> return str
+                          Right (new_table, new_logOp) -> insert_vals tr_id rowhash tablename t fieldnames row new_logOp:logOps
+    Nothing -> case default_val c of
+                 Nothing -> return ErrString ("DB error")
+                 Just val -> do res <- insert_val_helper tr_id rowhash tablename t f val
+                                case res of 
+                                  Left str -> return str
+                                  Right (new_table, new_logOp) -> insert_vals tr_id rowhash tablename t fieldnames row new_logOp:logOps   
 insert_vals _ _ _ t _ _ logOps = (t, logOps)
 
+{-Private-}
+insert_val_helper :: TransactionID -> RowHash -> Tablename -> Table -> Fieldname -> Element -> STM(Either ErrString (Table, LogOperation))
+insert_val_helper tr_id rowhash tablename t f new_elem = let new_logOp = TransactionLog tr_id (tablename, f, rowhash) Nothing (Just new_elem) 
+  in case lookup f (table t) of
+       Just c -> do col_map <- readTVar $ column c
+                    let new_col = Column (default_val c) (col_type c) (insert rowhash (Just new_elem) (col_map)) 
+                    let new_table = Table (rowCounter t) (primaryKey t) (insert fieldname new_col (table t))
+                    return (new_table, new_logOp)
+       Nothing -> return ErrString "DB error"
+
 {-Private: Get a list of fieldnames for which default_val was Nothing-}
-get_fields_with_defaults :: Table -> [Fieldname]
-get_fields_with_defaults t = let maybe_fieldnames = mapWithKey (\k v -> if (default_val v == Nothing) then Nothing else Just k) (table t) in
+get_fields_without_defaults :: Table -> [Fieldname]
+get_fields_without_defaults t = let maybe_fieldnames = mapWithKey (\k v -> if (default_val v == Nothing) then Nothing else Just k) (table t) in
   catMaybes maybe_fieldnames
 
 {-Private-}
@@ -159,40 +171,31 @@ check_unique :: [Fieldnames] -> Bool
 check_unique fieldnames = length fieldnames == size Set.fromList fieldnames
 
 {-Public: Inserts a row into a table
-  Handles the following error cases:
+  Handles the following error case:
   * user fails to specify value for a column with a default value of Nothing 
   We do not handle (these should have been taken care of in the construction of Row)
   * user names the same column twice 
   * user names an invalid column
 -}
 insert :: TVar Database -> TransactionID -> Tablename -> Row -> STM(Either (ErrString) [LogOperation]) 
-insert db tr_id tablename fieldnames_and_vals = do
+insert db tr_id tablename row = do
   tvar_table <- get_table db tablename
   case tvar_table of 
     Just x -> do t <- readTVar x -- t is of type Table
                  fields_without_defaults <- get_fields_without_defaults t 
-                 let fieldnames = fst unzip fieldnames_and_vals
-                 let fieldnames_valid = foldr (\fname bool -> bool && `member` get_all_fields) True fieldnames 
-                 if fieldnames_valid 
-                   then let has_required_vals = foldr (\fname bool -> bool && fname `member` fieldnames) True fields_without_defaults
-                          in if has_required_vals
-                               then if check_unique fieldnames 
-                                      then case insert_vals tr_id ((rowCounter t) + 1) tablename t fieldnames_and_vals empty [] of 
-                                             Left err_str -> return err_str 
-                                             Right (new_t, logOps) -> do writeTvar x new_t
-                                                                         return logOps
-                                      else return ErrString ("Cannot specify column more than once in one insert") 
-                               else return ErrString ("Failed to provide values for all columns in " + show(tablename) + " with no default")
-                   else return ErrString("Invalid fieldnames for " ++ show(tablename))
+                 let has_required_vals = foldr (\fname bool -> bool && ((getField row) fname != Nothing)) True $ get_fields_without_defaults t
+                   in if has_required_vals
+                        then case insert_vals tr_id ((rowCounter t) + 1) tablename t row empty [] of 
+                               Left err_str -> return err_str 
+                               Right (new_t, logOps) -> do writeTvar x new_t
+                                                           return logOps
+                         else return ErrString ("Failed to provide values for all columns in " + show(tablename) + " with no default")
     Nothing -> return ErrString (show(tablename) ++ " not found.")    
  
-get_row_for_hash :: Table -> RowHash -> Row
+{- get_row_for_hash :: Table -> RowHash -> Row
 get_row_for_hash :: t rhash = Row func
-     where func x = lookup col 'x' in Table and then look for rhash
+     where func x = lookup col 'x' in Table and then look for rhash -}
 
-{-Public:-}
-construct_element :: a -> STM(Element)
-construct_element = return newTVar $ Maybe a
 
 {- I do not plan on implementing these next two until I get everything else to compile, but these are the intended function prototypes -}
 {- delete :: TVar Database -> TransactionID -> Tablename -> (Row -> Bool) -> STM(Either (ErrString) LogOperation)
