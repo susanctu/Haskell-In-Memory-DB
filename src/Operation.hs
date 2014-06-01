@@ -82,55 +82,75 @@ alter_table_drop db tr_id tablename fieldname = do
     Nothing -> return ErrString (show(tablename) ++ " not found.") 
 
 {- Private -}
-check_elem :: (a -> Bool) -> Element a -> STM(Bool)
-check_elem f e = (readTVar $ element e) >>= f
+-- Each row is completely stored (i.e. you would get something if you looked up the rowhash in every column)
+-- so we take all the rowhashes, construct Rows for every row, only keep the ones that we get true for
+-- when we pass them to the (Row -> Bool) function. 
+-- returns the hashes of all the rows we want to show, and the rows themselves 
+get_rows :: Map Fieldname Column -> (Row -> Bool)-> STM([RowHash], [Row])
+get_rows table_map conds all_hashes = do
+  all_hashes <- let tvar_c = head elems table_map in do c <- readTVar tvar_c 
+                                                        return $ keys column c 
+  lst_of_tuples <- mapM (construct_row_for_hash) all_hashes 
+  return unzip $ filter (\(h, r) -> cond r ) lst_of_tuples
 
-{- Private -}
-filter_col :: Map RowHash (Element a) -> Maybe (a -> Bool) -> STM(Set.Set RowHash) 
-filter_col c func = case func of 
-  Nothing -> return c
-  Just f -> do list_of_maybe_hashes <- mapM (\(h,x) -> if check_elem f x then Just h else Nothing) (toList c)
-               return catMaybes list_of_maybe_hashes
 
-{- Private -}
-get_columns :: (forall a. Map (Fieldname a) (Column a)) -> (forall b. [Fieldname b]) -> (forall c. Map (Fieldname c) (c -> Bool)) -> (forall d. Map (Fieldname d) (Column d)) -> Set.Set RowHash -> STM(Either (Fieldname e) ((forall f. Map (Fieldname f) (Column f)), Set.Set RowHash))
-get_columns table_map f:fieldnames fieldnames_and_conds map_so_far ignore_hashes = case lookup f table_map of 
-  Just c -> do col_map <- readTVar column c
-               ignore_hashes <- filter_col col_map $ lookup f fieldnames_and_conds
-               let new_map = insert f new_col_map map_so_far
-               return Right $ get_columns table_map fieldnames fieldnames_and_conds new_map ignore_hashes
-  Nothing -> return Left f 
-get_columns table_map _ map_so_far ignore_hashes = return Right (map_so_far, ignore_hashes) 
+{-Private-}
+construct_row_for_hash :: Map Fieldname Column -> RowHash -> STM(RowHash, Row)
+construct_row_for_hash table_map rowhash = (rowhash, Row func)
+  where func fieldname = case lookup fieldname table_map of 
+                           Just tvar_c -> do c <- readTVar tvar_c
+                                             case lookup rowhash c of 
+                                               Nothing -> return Nothing
+                                               Just tvar_elem -> do e <- readTVar tvar_elem 
+                                                                    return Just e 
+                           Nothing -> return Nothing 
 
-{- Private -}
-get_row_for_hash :: (forall b. [(Fieldname b, Map RowHash (Element b))]) -> (forall a. Map (Fieldname a) (Column a)) -> Set.Set RowHash -> RowHash -> [STM String]
-get_row_for_hash list_of_cols fieldname_to_col ignore_hashes hash = fmap (\m -> case lookup hash m of 
-                                                                                  Nothing -> return $ show (lookup m fieldname_to_col)
-                                                                                  Just x -> do val <- readTvar (element a)
-                                                                                               return show(val)) (snd unzip list_of_cols)  
+{-Public:
+  A thin wrapper around construct_row_for_hash-}
+get_row_for_hash :: Table -> RowHash -> Row
+get_row_for_hash :: t rhash = construct_row_for_hash (table t) rhash 
+
+{-Public, incomplete-}
+get_column_type :: TVar Database -> Tablename -> Fieldname -> TypeRep
+get_column_type db tablename fieldname = 
+
+{-Public-}
+get_column_default :: TVar Database -> Tablename -> Fieldname -> Maybe Element
+
+{-Private: Recursively insert all the provided rows-}
+insert_all_vals :: TransactionID -> [RowHash] -> Tablename -> Table -> [Fieldnames] -> [Row] -> Either ErrString Table
+insert_all_vals tr_id rh:rowhash tablename t fieldnames r:rows = case insert_vals tr_id r tablename t fieldnames r [] of 
+  Left str -> Left str 
+  Right (new_t,_) -> Right new_t
+insert_all_vals _ _ _ t _ _ = t
 
 {- Public -}
--- Get the right columns, then filter columns individually, then create a set of rowhashes and output the rows that correspond to those rowhashes
--- resulting String is readable into list of lists
-select :: TVar Database -> Tablename -> [Fieldname] -> (Row -> Bool) -> STM(Either (ErrString) Table) -- last string is the stuff user queried for
-select db tablename show_fieldnames fieldnames_and_conds =  do
+-- Checks that fieldnames exist in the specified table
+-- Grab the columns then for all the rowhashes that we do not ignore 
+-- Make a Table (using insert_vals) with all those elements and return it
+select :: TVar Database -> Tablename -> [Fieldname] -> (Row -> Bool) -> STM(Either ErrString Table)
+select db tablename show_fieldnames cond =  do
   tvar_table <- get_table db tablename
   case tvar_table of 
     Just x -> do t <- readTVar x -- t is of type Table
-                 cols <- get_columns (table t) show_fieldnames fieldnames_and_conds empty
-                 case cols of 
-                   Left err_str -> return Left ErrString(show(err_str) ++ " not present in " ++ show(tablename))
-                   Right (col_map, ignore_hashes, all_hashes) -> let list_of_rows = map (get_row_for_hash zip(show_fieldnames col_map) (table t) ignore_hashes) all_hashes
-                                                                   in do list_of_lists <- sequence (map sequence list_of_rows) 
-                                                                         return show(list_of_lists)
+                 (show_hashes, rows) <- get_rows (table t) cond
+                 let table_map = constructTableMap (fmap (\fname -> (fname, get_column_default fname, get_column_type fname)) show_fieldnames)
+                     new_table = Table{rowCounter=(rowCounter t), primaryKey=(primary_key t), table=table_map}
+                     dummy_id = TransactionID ""
+                     in case insert_all_vals dummy_id show_hashes tablename new_table show_fieldnames rows
+                          Left str -> return Left str
+                          Right filled_table -> return Right filled_table
     Nothing -> return ErrString (show(tablename) ++ " not found.")
 
 {-Public-}
-{- join :: TVar Database -> Tablename -> Tablename -> (Row -> Row -> Bool) -> Table -}
+join :: TVar Database -> Tablename -> Tablename -> (Row -> Row -> Bool) -> Table
 
-{-Private: insert values int to the table, keeping track of what columns you have already
-  inserted into in order to check that we are not inserting twice into the same column. Also
-  collects and returns the appropriate LogOperations.
+{-Private: insert values int to the table for the columns specified by [Fieldnames].
+  Note that if you're operating on a table in the database, that means you should pass in all the fieldnames
+  present in the table. If you're trying to construct the table returned by select or join, you may be passing in only some of the fieldnames.
+  We only check for the fieldnames passed in that you actually specified a Non-Nothing value in the absence of a Just-wrapped default value
+  for the column.
+  Also collects and returns the appropriate LogOperations.
 -}
 insert_vals :: TransactionID -> RowHash -> Tablename -> Table -> [Fieldnames] -> Row -> [LogOperation] -> Either (ErrString) (Table, [LogOperation])
 insert_vals tr_id rowhash tablename t f:fieldnames row logOps = 
@@ -152,7 +172,8 @@ insert_val_helper :: TransactionID -> RowHash -> Tablename -> Table -> Fieldname
 insert_val_helper tr_id rowhash tablename t f new_elem = let new_logOp = TransactionLog tr_id (tablename, f, rowhash) Nothing (Just new_elem) 
   in case lookup f (table t) of
        Just c -> do col_map <- readTVar $ column c
-                    let new_col = Column (default_val c) (col_type c) (insert rowhash (Just new_elem) (col_map)) 
+                    new_tvar_elem <- newTvar Just new_elem
+                    let new_col = Column (default_val c) (col_type c) (insert rowhash new_tvar_elem (col_map)) 
                     let new_table = Table (rowCounter t) (primaryKey t) (insert fieldname new_col (table t))
                     return (new_table, new_logOp)
        Nothing -> return ErrString "DB error"
@@ -185,25 +206,20 @@ insert db tr_id tablename row = do
                  fields_without_defaults <- get_fields_without_defaults t 
                  let has_required_vals = foldr (\fname bool -> bool && ((getField row) fname != Nothing)) True $ get_fields_without_defaults t
                    in if has_required_vals
-                        then case insert_vals tr_id ((rowCounter t) + 1) tablename t row empty [] of 
+                        then case insert_vals tr_id ((rowCounter t) + 1) tablename t (get_all_fields t) row [] of 
                                Left err_str -> return err_str 
                                Right (new_t, logOps) -> do writeTvar x new_t
                                                            return logOps
                          else return ErrString ("Failed to provide values for all columns in " + show(tablename) + " with no default")
     Nothing -> return ErrString (show(tablename) ++ " not found.")    
- 
-{- get_row_for_hash :: Table -> RowHash -> Row
-get_row_for_hash :: t rhash = Row func
-     where func x = lookup col 'x' in Table and then look for rhash -}
-
 
 {- I do not plan on implementing these next two until I get everything else to compile, but these are the intended function prototypes -}
-{- delete :: TVar Database -> TransactionID -> Tablename -> (Row -> Bool) -> STM(Either (ErrString) LogOperation)
-delete db tr_id tablename fieldnames_and_conds =
+delete :: TVar Database -> TransactionID -> Tablename -> (Row -> Bool) -> STM(Either (ErrString) LogOperation)
+delete db tr_id tablename conds =
 
  
 update :: TVar Database -> TransactionID -> Tablename -> (Row -> Bool) -> (Row -> Row) -> STM (Either ErrString LogOperation)
-update db tr_id tablename fieldnames_vals_conds = -}
+update db tr_id tablename conds changes =
 
 {-Public-}
 show_tables :: TVar Database -> STM (String) -- doesn't actually update the db, so no need for logstring
