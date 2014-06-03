@@ -4,6 +4,7 @@
 
 import Data.Typeable 
 import Data.Map.Lazy
+import Control.Concurrent.Chan
 
 {- Exporting all types, constructors, and accessors -}
 module DBTypes (Tablename(..), ErrString(..), Database(..), Fieldname(..), Table(..), Column(..), Element(..), TransactionID(..), RowHash(..), LogOperation(..)) where
@@ -47,4 +48,4 @@ data LogOperation = Start TransactionID
                   | SetPrimaryKey TransactionID (Maybe Fieldname) (Maybe Fieldname) Tablename -- old field, new field
                   deriving (Show, Read) 
 
-
+type Log = Chan LogOperation
