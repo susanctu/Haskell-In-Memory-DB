@@ -3,7 +3,7 @@
 {-# LANGUAGE RankNTypes #-}
 
 {- Exporting all types, constructors, and accessors -}
-module DBTypes (Tablename(..), ErrString(..), Database(..), Fieldname(..), Table(..), Column(..), Element(..), TransactionID(..), RowHash(..), LogOperation(..), Row(..)) where
+module DBTypes (Tablename(..), ErrString(..), Database(..), Fieldname(..), Table(..), Column(..), Element(..), TransactionID(..), RowHash(..), LogOperation(..), Row(..), Log(..), ActiveTransactions(..)) where
 
 import Data.Typeable 
 import Control.Concurrent.STM
@@ -60,7 +60,7 @@ data LogOperation = Start TransactionID
                   | TransactionLog TransactionID (Tablename, Fieldname, RowHash) (Maybe Element) (Maybe Element) -- last two are old val, new val
                   | Commit TransactionID  
                   | StartCheckpoint [TransactionID]   
-                  | EndCheckpoint 
+                  | EndCheckpoint
                   | DropTable TransactionID Tablename 
                   | CreateTable TransactionID Tablename
                   | AddField TransactionID Tablename Fieldname
@@ -69,3 +69,4 @@ data LogOperation = Start TransactionID
                   deriving (Show, Read) 
 
 type Log = Chan LogOperation
+type ActiveTransactions = Set TransactionID
