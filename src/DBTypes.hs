@@ -2,21 +2,19 @@
 {-# LANGUAGE ExistentialQuantification #-} 
 {-# LANGUAGE RankNTypes #-}
 
-import Data.Typeable 
-import Data.Map.Lazy
-import Control.Concurrent.Chan
-
 {- Exporting all types, constructors, and accessors -}
-module DBTypes (Tablename(..), ErrString(..), Database(..), Fieldname(..), Table(..), Column(..), Element(..), TransactionID(..), RowHash(..), LogOperation(..)) where
+module DBTypes (Tablename(..), ErrString(..), Database(..), Fieldname(..), Table(..), Column(..), Element(..), TransactionID(..), RowHash(..), LogOperation(..), Row(..), Log(..)) where
 
+import Data.Typeable 
 import Control.Concurrent.STM
 import Data.Map.Lazy
+import Control.Concurrent.Chan
  
-newtype Tablename = Tablename String deriving(Eq, Show)
+newtype Tablename = Tablename String deriving(Eq, Show, Read)
 newtype ErrString = ErrString String deriving(Show)
 
 data Database = Database { database :: Map Tablename (TVar Table) }
-data Fieldname = Fieldname { fieldname :: String } deriving(Eq, Show)
+data Fieldname = Fieldname { fieldname :: String } deriving(Eq, Show, Read)
 
 data Table = Table { rowCounter :: Int 
                    , primaryKey :: Maybe Fieldname 
@@ -24,10 +22,16 @@ data Table = Table { rowCounter :: Int
 
 data Column = Column { default_val :: Maybe Element
                      , col_type :: TypeRep
-                     , column :: TVar(Map RowHash (Tvar Element))
+                     , column :: TVar(Map RowHash (TVar Element))
                      } -- first element is default value
 
-data Element = forall a. (Show a, Ord a) => Element { element :: (Maybe a) } -- Nothing here means that it's null
+data Element = forall a. (Show a, Ord a, Read a) => Element (Maybe a) -- Nothing here means that it's null
+
+instance Show Element where
+  show (Element x) = show x
+
+instance Read Element where
+  readsPrec _ str = [(fst (head (readsPrec 0 str)),"")]
 
 data TransactionID = TransactionID { clientName :: String 
                                    , transactionNum :: Int 
@@ -37,7 +41,7 @@ data Row = Row {getField :: Fieldname -> Maybe Element}
 
 newtype RowHash = RowHash Int deriving(Show, Read) 
 data LogOperation = Start TransactionID
-                  | forall a. (Show a, Ord a) => TransactionLog TransactionID (Tablename, Fieldname, Rowhash) (Maybe Element) (Maybe Element) -- last two are old val, new val
+                  | TransactionLog TransactionID (Tablename, Fieldname, RowHash) (Maybe Element) (Maybe Element) -- last two are old val, new val
                   | Commit TransactionID  
                   | StartCheckpoint [TransactionID]   
                   | EndCheckpoint 
