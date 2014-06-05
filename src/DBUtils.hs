@@ -1,11 +1,15 @@
-module DBUtils (construct_row, verify_row, transform_row, output_table, read_table)
+module DBUtils (construct_row, verify_row, transform_row,
+                output_table, read_table,
+                isCharType, isBitType, readType)
 where
 
 import Control.Concurrent.STM
 import Control.Monad
+
 import DBTypes
 import Data.Typeable
-import Data.Maybe
+import Data.Int
+import qualified Data.ByteString as B
 import qualified Data.Map.Lazy as Map
 
 data ShowableTable = ShowableTable { rowCounter :: Int
@@ -20,12 +24,24 @@ output_table :: Table -> IO String
 output_table table = atomically $ do showable <- from_table table
                                      return $ show showable
 
+--colToTable :: TVar(Map RowHash (TVar Element) -> STM (Map.Map RowHash Element)
+
 from_table :: Table -> STM ShowableTable
-from_table table = return $ ShowableTable 0 Nothing Map.empty
+from_table tab = do
+    let stage1 = map (\(f, c) -> (f, from_column c)) $ Map.toList $ DBTypes.table tab
+        stage2 = map (\(f, stc) -> do
+            col <- stc -- should propagate the STM type
+            return (f, col)) stage1
+    colMap <- Map.fromList $ sequence stage2
+    return $ ShowableTable (DBTypes.rowCounter tab) (DBTypes.primaryKey tab) colMap
 
 from_column :: Column -> STM ShowableColumn
-from_column col = return $ ShowableColumn Nothing "" Map.empty
-
+from_column = undefined
+{-from_column col = do
+    colData' <- readTVar $ column col
+    colData <- 
+    return $ ShowableColumn (default_val col) (col_type col) colData
+-}
 read_table :: String -> IO (TVar Table)
 read_table str = atomically $ to_table $ read str
 
@@ -50,3 +66,20 @@ transform_row content row = let transformed = zip (map fst content) $ zipWith li
                                                                           Nothing -> return Nothing
     where evaluate f Nothing  = Nothing
           evaluate f (Just x) = Just (f x)
+
+-- char(n) or varchar(n)
+isCharType :: String -> Bool
+isCharType s = take 4 s == "char" || take 7 s == "varchar"
+
+-- Haskell doesn't seem to have a native bit-array type, so not clear what we should do.
+-- bit(n) or bitvarying(n)
+isBitType :: String -> Bool
+isBitType s = take 3 s == "bit" -- since there are only so many types
+
+readType :: String -> TypeRep
+readType ftype
+    | ftype == "boolean" = typeOf(undefined :: Bool)
+    | isCharType ftype || isBitType ftype = typeOf(undefined :: B.ByteString)
+    | ftype == "integer" = typeOf(undefined :: Int32)
+    | ftype == "real"    = typeOf(undefined :: Double)
+    | otherwise = typeOf(undefined :: B.ByteString)
