@@ -57,7 +57,12 @@ detectPrimaryKey fieldInfo = case (filter (\args -> head (words args) == "PRIMAR
     []    -> Nothing
 
 readType :: String -> TypeRep
-readType = undefined -- TODO
+readType ftype
+	| ftype == "boolean" = typeOf(undefined :: Bool)
+	| isCharType ftype || isBitType ftype = typeOf(undefined :: B.ByteString)
+	| ftype == "integer" = typeOf(undefined :: Int32)
+	| ftype == "real"	 = typeOf(undefined :: Double)
+	| otherwise = typeOf(undefined :: B.ByteString)
 
 --inelegant, but sort-of polymorphism.
 getBool :: Maybe String -> Maybe Bool
@@ -227,14 +232,19 @@ executeRequests db transSet logger tID cmds = do
     where actReq     = atomicAction    db transSet logger  tID
           recurseReq = executeRequests db transSet logger (incrementTId tID)
 
-readCmds = undefined -- derp
+readCmds :: Handle -> [String] -> IO [String]
+readCmds h arr = do
+	s <- hGetLine h
+	if s == "STOP"
+	then return arr
+	else readCmds h $ arr ++ [s]
 
 -- loops a session with a single client. Runs in its own thread.
 -- TODO error-handling.
 clientSession :: TVar Database -> TVar ActiveTransactions -> Log ->
                  TransactionID -> Handle -> String -> IO ()
 clientSession db transSet logger tID h name = do
-    cmds <- readCmds h
+    cmds <- readCmds h []
     case (head cmds) of
         "QUIT" -> do
             hClose h
