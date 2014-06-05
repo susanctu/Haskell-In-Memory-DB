@@ -63,7 +63,7 @@ construct_row :: [(Fieldname, Element)] -> Row
 construct_row content = return . (flip lookup content)
 
 verify_row :: [(Fieldname, Element->Bool)] -> Row -> STM Bool
-verify_row content row = foldR (liftM2 (&&)) (return True) $ zipWith liftM (map (evaluate . snd) content) $ map (getField row) (map fst content) 
+verify_row content row = foldr (liftM2 (&&)) (return True) $ zipWith liftM (map (evaluate . snd) content) $ map (getField row) (map fst content) 
     where evaluate f Nothing = False
           evaluate f Just x  = f x
 
