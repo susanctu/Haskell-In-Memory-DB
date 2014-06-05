@@ -1,11 +1,21 @@
 import DBTypes
+import DBUtils
 import Control.Concurrent
-import Control.Concurrent.Chan
 import Control.Concurrent.STM
+import Control.Concurrent.STM.TChan
 import Control.Monad
 import qualified Data.Map.Lazy as Map
 import qualified Data.Set as Set
 import qualified Operation as O
+import System.Directory
+import System.FilePath
+import Server (runServer)
+
+special_folder :: FilePath
+special_folder = ".hmdb"
+
+log_file :: FilePath
+log_file = special_folder </> ".log"
 
 write_db :: Database -> IO ()
 write_db db = return ()
@@ -13,18 +23,24 @@ write_db db = return ()
 --              where write_all tablenames = mapM_ (write_table db) tablenames
 
 flush_log :: Log -> IO ()
-flush_log l = return ()
+flush_log l = do l_copy <- atomically $ dupTChan l
+                 l_list <- extract l_copy []
+                 writeFile log_file $ show l_list
+    where extract chan l = do flag <- atomically $ isEmptyTChan chan
+                              if flag then return l
+                                      else do li <- atomically $ readTChan chan 
+                                              extract chan (li : l)
 
 consume_log :: Log -> ActiveTransactions -> IO ()
 consume_log l active = do flag <- should_consume l active
                           if flag
-                            then readChan l >> consume_log l active
+                            then (atomically $ readTChan l) >> consume_log l active
                             else return ()
 
-  where should_consume l active = do l_copy <- dupChan l
-                                     op <- readChan l_copy
-                                     case op of Start trans_id -> return $ Set.notMember trans_id active
-                                                _              -> return True
+    where should_consume l active = do l_copy <- atomically $ dupTChan l
+                                       op <- atomically $ readTChan l_copy
+                                       case op of Start trans_id -> return $ Set.notMember trans_id active
+                                                  _              -> return True
 
 run_checkpoint :: TVar Database -> Log -> TVar ActiveTransactions -> IO ()
 run_checkpoint db l active = do threadDelay 30000000 --thirty seconds
@@ -37,9 +53,9 @@ run_checkpoint db l active = do threadDelay 30000000 --thirty seconds
                                 flush_log l
                                 run_checkpoint db l active
     where checkpoint db l active = do
-            writeChan l $ StartCheckpoint $ Set.toList active
+            atomically $ writeTChan l $ StartCheckpoint $ Set.toList active
             write_db $ db
-            writeChan l EndCheckpoint
+            atomically $ writeTChan l EndCheckpoint
 
 undo :: TVar Database -> [LogOperation] -> IO (Set.Set TransactionID)
 undo db ops = foldr (process db) (return Set.empty) ops
@@ -78,19 +94,20 @@ read_db :: IO (TVar Database)
 read_db = newTVarIO $ Database Map.empty
 
 read_log :: IO [LogOperation]
-read_log = return []
+read_log = liftM read $ readFile log_file
 
 hydrate :: IO (TVar Database)
-hydrate = do db <- read_db
+hydrate = do createDirectoryIfMissing False special_folder
+             db <- read_db
              l <- read_log
              recover db l
              return db
 
 start_db :: IO ()
 start_db = do db <- hydrate
-              l <- newChan :: IO Log
+              l <- newTChanIO :: IO Log
               active <- newTVarIO (Set.empty :: ActiveTransactions)
-              --start server with forkIO
+              --forkIO $ run_server
               forkIO $ run_checkpoint db l active
               return ()
 

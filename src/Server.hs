@@ -21,6 +21,7 @@ import System.IO
 
 import Network
 import DBTypes -- for all the types of the functions in Operation. Hmmm.
+import DBUtils
 import Operation
 
 type QueryResult = Either ErrString [LogOperation]
@@ -193,7 +194,7 @@ atomicAction db transSet logger tID cmds = do
         modifyTVar transSet (S.delete tID)
         return compRes -- type ([LogOperation], Maybe ErrString) wrapped in IO
     -- then, write to the log, which is a Chan of LogOperations
-    mapM_ (writeChan logger) toLog
+    mapM_ (atomically . writeTChan logger) toLog
     return errStr
 
 -- increments the Transaction ID by 1, leaving its name the same.
