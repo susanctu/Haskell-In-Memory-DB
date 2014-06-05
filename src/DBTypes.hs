@@ -34,8 +34,12 @@ instance Read Element where
   readsPrec _ str = [(fst (head (readsPrec 0 str)),"")]
 
 {-How do this correctly?-}
-{-instance Eq Element where
-  (Element x)==(Element y)= case x of 
+instance Eq Element where
+  '==' (Element x) (Element y) | Just x_val <- x, Just y_val <- y = x == y
+                               | Nothing <- x, Nothing <- y       = True
+                               | otherwise                        = False
+
+{-  (Element x)==(Element y)= case x of 
                               Just a -> case y of 
                                           Just b -> if typeOf a == typeOf b
                                                       then (a == b)
