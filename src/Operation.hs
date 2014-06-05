@@ -15,6 +15,7 @@ import qualified Data.Map.Lazy as L
 import Data.Typeable
 import Data.Maybe
 import DBTypes
+import DBUtils
 import qualified Data.Foldable as M
 
 {-Private: Constructs the map inside a table-}

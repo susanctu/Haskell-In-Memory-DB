@@ -16,17 +16,18 @@ module DBTypes (Tablename(..)
   , LogOperation(..)
   , Row(..)
   , Log(..)
-  , ActiveTransactions(..)
-  , construct_row
-  , verify_row
-  ,transform_row) where
+  , ActiveTransactions(..)) where
 
 
 import Data.Typeable 
 import Control.Concurrent.STM
-import Control.Concurrent.Chan
+import Control.Concurrent.STM.TChan
 import Test.QuickCheck
 import Control.Monad
+import Data.ByteString (ByteString)
+import Data.Int (Int32)
+import Data.List (isPrefixOf, stripPrefix)
+import Data.Maybe
 import Data.Map.Lazy (Map)
 import Data.Set (Set)
 
@@ -55,10 +56,14 @@ data Column = Column { default_val :: Maybe Element
 data Element = forall a. (Show a, Ord a, Eq a, Read a, Typeable a) => Element (Maybe a) -- Nothing here means that it's null
 
 instance Show Element where
-  show (Element x) = show x
+  show (Element x) | typeOf x == typeOf (undefined::Maybe Int32)      = "Int32" ++ show x
+                   | typeOf x == typeOf (undefined::Maybe Double)     = "Double" ++ show x
+                   | typeOf x == typeOf (undefined::Maybe ByteString) = "ByteString" ++ show x
 
 instance Read Element where
-  readsPrec _ str = [(fst (head (readsPrec 0 str)),"")]
+  readsPrec n str | isPrefixOf "Int32" str      = map (\(a,b) -> (Element a, b)) $ (readsPrec n :: ReadS (Maybe Int32)) $ fromJust $ stripPrefix "Int32" str
+                  | isPrefixOf "Double" str     = map (\(a,b) -> (Element a, b)) $ (readsPrec n :: ReadS (Maybe Double)) $ fromJust $ stripPrefix "Double" str
+                  | isPrefixOf "ByteString" str = map (\(a,b) -> (Element a, b)) $ (readsPrec n :: ReadS (Maybe ByteString)) $ fromJust $ stripPrefix "ByteString" str
 
 instance Eq Element where
   (Element mx) == (Element my) = case cast mx of Just typed_mx -> typed_mx == my
@@ -69,21 +74,6 @@ data TransactionID = TransactionID { clientName :: String
                                    } deriving(Eq, Ord, Show, Read)-- clientname, transaction number
  
 data Row = Row {getField :: Fieldname -> STM(Maybe Element)}
-
-construct_row :: [(Fieldname, Element)] -> Row
-construct_row content = Row $ return . (flip lookup content)
-
-verify_row :: [(Fieldname, Element->Bool)] -> Row -> STM Bool
-verify_row content row = foldr (liftM2 (&&)) (return True) $ zipWith liftM (map (evaluate . snd) content) $ map (getField row) (map fst content) 
-    where evaluate f Nothing   = False
-          evaluate f (Just x)  = f x
-
-transform_row :: [(Fieldname, Element -> Element)] -> Row -> Row
-transform_row content row = let transformed = zip (map fst content) $ zipWith liftM (map (evaluate . snd) content) $ map (getField row) (map fst content) --type is [(Fieldname, STM Maybe Element)]
-                              in Row $ \f -> case lookup f transformed of Just x  -> x
-                                                                          Nothing -> return Nothing
-    where evaluate f Nothing  = Nothing
-          evaluate f (Just x) = Just (f x)
 
 newtype RowHash = RowHash Int deriving(Show, Read, Eq, Ord) 
 data LogOperation = Start TransactionID
@@ -100,5 +90,5 @@ data LogOperation = Start TransactionID
                   | SetPrimaryKey TransactionID (Maybe Fieldname) (Maybe Fieldname) Tablename -- old field, new field
                   deriving (Show, Read) 
 
-type Log = Chan LogOperation
+type Log = TChan LogOperation
 type ActiveTransactions = Set TransactionID
