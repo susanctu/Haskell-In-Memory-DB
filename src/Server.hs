@@ -17,16 +17,6 @@ import Operation
 
 type QueryResult = Either ErrString LogOperation
 
-{- throws away the logging operations that we don't expose to the user... I think.
-I misunderstood. This shouldn't exist. Carry on!
-justLeft :: IO (Either ErrString b) -> IO (Either ErrString String)
-justLeft result = do
-	case result of
-		Left errStr -> return $ Left errStr
-		Right _		-> return $ Right "" -- empty string => no error, nothing to return
--}
-justLeft = undefined -- for incremental compilation
-
 -- The following two functions aren't the best designed, but I'm not sure we want to
 -- make the distinction.
 -- char(n) or varchar(n)
@@ -106,21 +96,15 @@ alter_drop_util db tID tableStr fieldStr = do
 
 -- This is parsed as INSERT INTO tablename(fieldname) VALUES values
 -- I'm pretty sure this needs to be reworked.
-insert_util :: TVar Database -> TransactionID -> String -> String -> IO (Either String String)
+insert_util :: TVar Database -> TransactionID -> String -> String -> STM QueryResult
 insert_util db tID tableData values = do
 	hash <- getStdRandom random -- this is still an Int; needs to be converted into a RowHash
-	atomically $ insert db tID (RowHash rowHash) (TableName tablename) {- values -}
+	insert db tID (RowHash rowHash) (TableName tablename) {- values -}
 	where (tablename:fieldname:_) = splitOneOf "()" tableData
 		  valueList = splitOneOf "(:); " values
 
-{-delete_util :: TVar Database -> TransactionID -> String ->
-
-update_util :: TVar Database -> TransactionID -> String -> IO (Either String String)
-update_util db tID toParse
-	| toParse !! 1 /= "SET"		= Left "UPDATE clause improperly formed."
-	| --- uhhhhhh -}
-delete_util = undefined
-update_util = undefined
+--delete_util = undefined
+--update_util = undefined
 
 --parseCommand :: TVar Database -> TransactionID -> [String] -> IO (Either String String)
 parseCommand :: TVarDatabase -> TransactionID -> [String] -> STM QueryResult
@@ -129,14 +113,34 @@ parseCommand :: TVarDatabase -> TransactionID -> [String] -> STM QueryResult
 	parseCommand db tID ["ALTER", "TABLE", tablename, "ADD", fieldname, typename] = alter_add_util db tID tablename fieldname typename
 	parseCommand db tID ["ALTER", "TABLE", tablename, "DROP", fieldname] = alter_drop_util db tID tablename fieldname
 
+{- TODOs:
+	SELECT
+	INSERT INTO
+	DELETE
+	UPDATE -}
+
+	-- show_tables is handled earlier.
+	parseCommand _ _ = return $ Left "Command not found."
 -- below this waterline, haven't updated my stuff.
 		-- SELECT ... syntax will be trickier
-	parseCommand db tID ["INSERT", "INTO", tableData, "VALUES", values] = insert_util db tID tableData values
+	--parseCommand db tID ["INSERT", "INTO", tableData, "VALUES", values] = insert_util db tID tableData values
 	-- parseCommand db tID ["DELETE", "FROM", tablename, "WHERE", conditions] = atomically $ delete db tID tablename {-???-}
-	-- I need to figure out what these statements look like. All right.
 	-- parseCommand db tID ("UPDATE":xs) = update_util db tID xs
-	parseCommand db _ ["SHOW", "TABLES"] = Right $ atomically $ show_tables db
-	parseCommand _ _ = Left "Command not found."
+
+
+-- to handle error-checking, since it would be a bit awkward within atomicAction
+-- recurses by passing in the LogOperations done thus far, so it can quit if need be.
+-- the "maybe" is a nothing if there were no errors.
+commandWrapper :: TVar Database -> TransactionID -> [String] -> [LogOperation]
+								-> STM ([LogOperation], Maybe ErrString)
+commandWrapper _ _ [] logVal = return (logVal, Nothing)
+commandWrapper db tID cmds prtResults = do
+	queryResult <- parseCommand db tID (words cmd)
+	case queryResult of
+		Left errStr -> do -- no further computation. All right then.
+			return (logVal, Just errStr)
+		Right logVal -> do
+			return $ commandWrapper db tID (tail cmds) (prtResults ++ [logVal])
 
 -- "atomic action" sounds like the name of an environmental protest group.
 {- This function takes care of the logistics behind executing an atomic block
@@ -144,36 +148,41 @@ parseCommand :: TVarDatabase -> TransactionID -> [String] -> STM QueryResult
 
    The type signature is identical to executeRequests, below, but this time
    the list of commands has the correct atomicity.
-
-   TODO: Error handling will need to be done here. In particular, toLog will be
-   QueryResult.
  -}
 atomicAction :: TVar Database -> TVar ActiveTransaction -> Log
-				TransactionID -> [String] -> IO ()
+				TransactionID -> [String] -> IO (Maybe ErrString)
 atomicAction db transSet log nextID cmds = do
-	toLog <- atomically $ do
+	(toLog, errStr) <- atomically $ do
 		modifyTVar transSet (insert nextID)
-		{- error checking resides within parseCommand, because different kinds
-		   of commands will have different return types -}
-		toLog <- mapM handleReq cmds
+		compRes <- commandWrapper db tID cmds []
 		modifyTVar transSet (delete nextID)
-		return toLog -- type [LogOperation], wrapped in IO
+		return compRes -- type ([LogOperation], Maybe ErrString) wrapped in IO
 	-- then, write to the log, which is a Chan of LogOperations
 	mapM_ writeChan toLog
-	where handleReq cmd = parseCommand db tID (words cmd)
+	return errStr
+
+-- increments the Transaction ID by 1, leaving its name the same.
+incrementTId :: TransactionID -> TransactionID
+incrementTId tID val = TransactionID {
+	clientName = clientName tID,
+	transactionNum = 1 + transactionNum tID
+}
+
+-- TODO: determine whether a given command will alter the table,
+-- thus forcing it to be given its own atomic command.
+altersTable :: String -> Bool
+altersTable cmd = undefined
 
 {- Split off recursively: all requests that don't modify the table should be done atomically.
    Those that do modify the table should be done in their own call to atomically.
 
    Thus, this function groups the first transactions that don't modify the table and runs them,
    then recurses.
-
-   TODO: pass this an actual transaction ID.
  -}
 executeRequests :: TVar Database -> TVar ActiveTransaction -> Log ->
-				   TransactionID -> [String] -> IO ()
+				   TransactionID -> [String] -> IO (Maybe ErrString)
 -- base case
-executeRequests _ _ _ _ [] = ()
+executeRequests _ _ _ _ [] = return Nothing
 executeRequests db transSet log nextID cmds = do
 	case findIndex altersTable cmds of
 		Just 0 -> do -- the first request alters the table.
@@ -183,10 +192,29 @@ executeRequests db transSet log nextID cmds = do
 			actReq $ take n cmds
 			recurseReq $ drop n cmds
 		-- if nothing changes the table, then I can just do everything.
-		-- need to update some type signatures.
 		Nothing -> actReq cmds
 	where actReq	 = atomicAction	   db transSet log  nextID
-		  recurseReq = executeRequests db transSet log (nextID+1)
+		  recurseReq = executeRequests db transSet log (increment nextID)
+
+-- loops a session with a single client. Runs in its own thread.
+-- TODO error-handling.
+clientSession :: TVar Database -> TVar ActiveTransaction -> Log ->
+				 TransactionID -> Handle -> String -> IO ()
+clientSession db transSet log tID h name = do
+	cmds <- readCmds h
+	case (head cmd) of
+		"QUIT" -> do
+			hClose h
+			return ()
+--		"SHOW TABLES" -> hPutStrLn $ atomically $ show_table db
+--		will not be only one line. Have a protocol.
+-- 		need to put this somewhere...
+		_ -> do
+	  		result <- executeRequests db transSet log tID cmds
+			case result of
+				Maybe error -> hPutStrLn h $ "ERROR: " ++ error
+				Nothing -> return -- nothing needs to be done.
+			clientSession db transSet log (incrementTId tID) h name
 
 -- TODO: possibly use a ThreadPool
 {- The point of initVal might not be clear: different threads must still create
@@ -196,39 +224,22 @@ executeRequests db transSet log nextID cmds = do
    The upshot is that when there are multiple threads, IDs of actions don't necessarily come in order,
    but they will be unique.
  -}
-processRequests :: TVar Database -> Int -> Socket -> IO ()
-processRequests db initVal s = do
-	(h, _, _) <- accept s
+processRequests :: TVar Database -> TVar ActiveTransaction -> Log ->
+				   Int -> Socket -> IO ()
+processRequests db transSet log initVal s = do
+	-- hostName is useful for assigning a name to each client.
+	(h, hostName, _) <- accept s
 	hSetBuffering h LineBuffering
-	{- The protocol requires the client to send its name first. This isn't the most normal
-	   protocol, but we need a clientName around somewhere and this seems like the best way to
-	   get it. I guess I should also check it against a set of already-used names...
-	 -}
-	name <- hGetStrLn h
-	threadID <- forkIO clientSession name initVal db h
-	processRequests db s (initVal + 1000000)
-
--- loops a session with a single client. Runs in its own thread.
--- TODO error-handling.
-clientSession :: String -> Int -> TVar Database -> Handle -> IO ()
-clientSession name tID db h = do
-	cmd <- hGetLine h
-	if cmd == "QUIT" then do
-		hClose h
-		return ()
-	else do
-		let t = TransactionID {
-			clientName = name,
-			transactionNum = tID
-		}
-	  	result <- parseCommand db t $ words cmd
-		case result of
-			Left error -> hPutStrLn h $ "ERROR: " ++ error
-			Right msg -> hPutStrLn h msg
-		clientSession name (tID+1) db h
+	threadID <- forkIO $ clientSession db transSet log tID h
+	processRequests db transSet log (initVal + 1000000)
+	where tID = {
+		clientName = hostName,
+		transactionNum = initVal
+	}
 
 -- entry point, assuming initialization of the database.
-runServer :: PortNumber -> TVar Database -> IO ()
-runServer port db = do
+runServer :: TVar Database -> TVar ActiveTransaction -> Log ->
+			 PortNumber -> IO ()
+runServer db transSet log port = do
 	-- listen for connections and spin each one off into its own thread.
-	bracket (listenOn port) sClose (processRequests db 0)
+	bracket (listenOn port) sClose (processRequests db transSet log 0)
