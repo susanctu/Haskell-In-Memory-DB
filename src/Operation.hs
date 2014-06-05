@@ -51,13 +51,13 @@ get_table db tablename =  do
   return $ L.lookup tablename (database hmdb)    
 
 {-Public: Drop the specified table-}
-drop_table :: TVar Database -> TransactionID -> Tablename -> STM (Either (ErrString) LogOperation)
+drop_table :: TVar Database -> TransactionID -> Tablename -> STM (Either (ErrString) [LogOperation])
 drop_table db tr_id tablename_arg = do 
   hmdb <- readTVar db
   table <- get_table db tablename_arg
   case table of 
     Just _ -> do writeTVar db  $ Database (L.delete tablename_arg (database hmdb))
-                 return $ Right $ DropTable tr_id tablename_arg  
+                 return $ Right $ [DropTable tr_id tablename_arg]
     Nothing -> return $ Left $ ErrString (show(tablename_arg) ++ " not found.")    
 
 {-Public: Add a field to a table, with optional specification of default value and primary key-}
