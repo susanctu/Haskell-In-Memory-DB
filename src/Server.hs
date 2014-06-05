@@ -8,19 +8,24 @@ import Control.Concurrent
 import qualified Data.ByteString as B
 import Data.List.Split (splitOneOf)
 import Data.Int
+import Data.Set
 import System.Random
 
 import Network
 import Types -- for all the types of the functions in Operation. Hmmm.
 import Operation
 
--- throws away the logging operations that we don't expose to the user... I think.
--- if I am wrong, this isn't hard to fix.
+type QueryResult = Either ErrString LogOperation
+
+{- throws away the logging operations that we don't expose to the user... I think.
+I misunderstood. This shouldn't exist. Carry on!
 justLeft :: IO (Either ErrString b) -> IO (Either ErrString String)
 justLeft result = do
 	case result of
 		Left errStr -> return $ Left errStr
 		Right _		-> return $ Right "" -- empty string => no error, nothing to return
+-}
+justLeft = undefined -- for incremental compilation
 
 -- The following two functions aren't the best designed, but I'm not sure we want to
 -- make the distinction.
@@ -74,35 +79,30 @@ createField fieldInfo
 		  read' = liftM read
 
 -- xs is of the form (fieldname type, fieldname type, fieldname type, PRIMARY KEY fieldname)
-create_util :: TVar Database -> TransactionID -> String -> String -> IO (Either ErrString String)
+create_util :: TVar Database -> TransactionID -> String -> String -> STM QueryResult
 -- Note: in general, tableStr means a String holding a Tablename that has yet to be converted.
 create_util db tID tableStr xs = do
 	let fieldInfo = splitOneOf "(,)" xs -- warning! This will kill parentheses elsewhere in the strings.
 		-- split into the primary and non-primary section
 		primaryKey = detectPrimaryKey fieldInfo
 		fieldTypes = map createField $ filter (\args -> head (words args) /= "PRIMARY") fieldInfo
-	result <- atomically $ create_table db tID (Tablename tableStr) fieldTypes primaryKey
-	return $ justLeft result
-
-drop_util :: TVar Database -> TransactionID -> String -> IO (Either ErrString String)
-drop_util db tID tableStr = justLeft $ atomically $ drop_table db tID (Tablename tableStr)
+	return $ create_table db tID (Tablename tableStr) fieldTypes primaryKey
 
 -- TODO this needs to handle the default value, somehow
 -- this is a parsing problem, I believe.
 -- also, I need to add the possibility of this being the default key.
-alter_add_util :: TVar Database -> TransactionID -> String -> String -> String -> IO (Either ErrString String)
+alter_add_util :: TVar Database -> TransactionID -> String -> String -> String -> STM QueryResult
 alter_add_util db tID tableStr fieldStr typename = do
 	let tablename = Tablename tableStr
 		fieldname = Fieldname fieldStr
 		typeKind  = readType typename
-	result <- atomically $ alter_table_add db tID tablename fieldname typeKind Nothing False
-	return $ justLeft result
+	return $ alter_table_add db tID tablename fieldname typeKind Nothing False
 
-alter_drop_util :: TVar Database -> TransactionID -> String -> String -> IO (Either ErrString String)
+alter_drop_util :: TVar Database -> TransactionID -> String -> String -> STM QueryResult
 alter_drop_util db tID tableStr fieldStr = do
 	let tablename = Tablename tableStr
 		fieldname = Fieldname fieldStr
-	return $ justLeft $ atomically $ alter_table_drop db tID tablename fieldname
+	return $ alter_table_drop db tID tablename fieldname
 
 -- This is parsed as INSERT INTO tablename(fieldname) VALUES values
 -- I'm pretty sure this needs to be reworked.
@@ -122,12 +122,15 @@ update_util db tID toParse
 delete_util = undefined
 update_util = undefined
 
-parseCommand :: TVar Database -> TransactionID -> [String] -> IO (Either String String)
+--parseCommand :: TVar Database -> TransactionID -> [String] -> IO (Either String String)
+parseCommand :: TVarDatabase -> TransactionID -> [String] -> STM QueryResult
 	parseCommand db tID ("CREATE":"TABLE":tablename:xs) = create_util db tID tablename $ unwords xs
-	parseCommand db tID ["DROP", "TABLE", tablename] = drop_util db tID tablename
+	parseCommand db tID ["DROP", "TABLE", tablename] = drop_table db tID (Tablename tablename)
 	parseCommand db tID ["ALTER", "TABLE", tablename, "ADD", fieldname, typename] = alter_add_util db tID tablename fieldname typename
-	parseCommand db tID ["ALTER", "TABLE", tablename, "DROP", fieldname] = atomically $ alter_table_drop db tID tablename fieldname
-	-- SELECT ... syntax will be trickier
+	parseCommand db tID ["ALTER", "TABLE", tablename, "DROP", fieldname] = alter_drop_util db tID tablename fieldname
+
+-- below this waterline, haven't updated my stuff.
+		-- SELECT ... syntax will be trickier
 	parseCommand db tID ["INSERT", "INTO", tableData, "VALUES", values] = insert_util db tID tableData values
 	-- parseCommand db tID ["DELETE", "FROM", tablename, "WHERE", conditions] = atomically $ delete db tID tablename {-???-}
 	-- I need to figure out what these statements look like. All right.
@@ -135,24 +138,55 @@ parseCommand :: TVar Database -> TransactionID -> [String] -> IO (Either String 
 	parseCommand db _ ["SHOW", "TABLES"] = Right $ atomically $ show_tables db
 	parseCommand _ _ = Left "Command not found."
 
--- loops a session with a single client. Runs in its own thread.
--- TODO error-handling.
-clientSession :: String -> Int -> TVar Database -> Handle -> IO ()
-clientSession name tID db h = do
-	cmd <- hGetLine h
-	if cmd == "QUIT" then do
-		hClose h
-		return ()
-	else do
-		let t = TransactionID {
-			clientName = name,
-			transactionNum = tID
-		}
-	  	result <- parseCommand db t $ words cmd
-		case result of
-			Left error -> hPutStrLn h $ "ERROR: " ++ error
-			Right msg -> hPutStrLn h msg
-		clientSession name (tID+1) db h
+-- "atomic action" sounds like the name of an environmental protest group.
+{- This function takes care of the logistics behind executing an atomic block
+   of actions: updating the transaction set, doing the logging, and so on.
+
+   The type signature is identical to executeRequests, below, but this time
+   the list of commands has the correct atomicity.
+
+   TODO: Error handling will need to be done here. In particular, toLog will be
+   QueryResult.
+ -}
+atomicAction :: TVar Database -> TVar ActiveTransaction -> Log
+				TransactionID -> [String] -> IO ()
+atomicAction db transSet log nextID cmds = do
+	toLog <- atomically $ do
+		modifyTVar transSet (insert nextID)
+		{- error checking resides within parseCommand, because different kinds
+		   of commands will have different return types -}
+		toLog <- mapM handleReq cmds
+		modifyTVar transSet (delete nextID)
+		return toLog -- type [LogOperation], wrapped in IO
+	-- then, write to the log, which is a Chan of LogOperations
+	mapM_ writeChan toLog
+	where handleReq cmd = parseCommand db tID (words cmd)
+
+{- Split off recursively: all requests that don't modify the table should be done atomically.
+   Those that do modify the table should be done in their own call to atomically.
+
+   Thus, this function groups the first transactions that don't modify the table and runs them,
+   then recurses.
+
+   TODO: pass this an actual transaction ID.
+ -}
+executeRequests :: TVar Database -> TVar ActiveTransaction -> Log ->
+				   TransactionID -> [String] -> IO ()
+-- base case
+executeRequests _ _ _ _ [] = ()
+executeRequests db transSet log nextID cmds = do
+	case findIndex altersTable cmds of
+		Just 0 -> do -- the first request alters the table.
+			actReq [head cmds]
+			recurseReq $ tail cmds
+		Just n -> do -- the (n+1)st request alters the table, but the first n don't.
+			actReq $ take n cmds
+			recurseReq $ drop n cmds
+		-- if nothing changes the table, then I can just do everything.
+		-- need to update some type signatures.
+		Nothing -> actReq cmds
+	where actReq	 = atomicAction	   db transSet log  nextID
+		  recurseReq = executeRequests db transSet log (nextID+1)
 
 -- TODO: possibly use a ThreadPool
 {- The point of initVal might not be clear: different threads must still create
@@ -174,8 +208,27 @@ processRequests db initVal s = do
 	threadID <- forkIO clientSession name initVal db h
 	processRequests db s (initVal + 1000000)
 
+-- loops a session with a single client. Runs in its own thread.
+-- TODO error-handling.
+clientSession :: String -> Int -> TVar Database -> Handle -> IO ()
+clientSession name tID db h = do
+	cmd <- hGetLine h
+	if cmd == "QUIT" then do
+		hClose h
+		return ()
+	else do
+		let t = TransactionID {
+			clientName = name,
+			transactionNum = tID
+		}
+	  	result <- parseCommand db t $ words cmd
+		case result of
+			Left error -> hPutStrLn h $ "ERROR: " ++ error
+			Right msg -> hPutStrLn h msg
+		clientSession name (tID+1) db h
+
 -- entry point, assuming initialization of the database.
-runServer :: PortNumber -> TVar Database IO ()
+runServer :: PortNumber -> TVar Database -> IO ()
 runServer port db = do
 	-- listen for connections and spin each one off into its own thread.
 	bracket (listenOn port) sClose (processRequests db 0)
