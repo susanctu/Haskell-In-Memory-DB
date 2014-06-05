@@ -9,12 +9,20 @@ import Data.Typeable
 import Control.Concurrent.STM
 import Data.Map.Lazy
 import Control.Concurrent.Chan
- 
+import Data.Set as S 
+import Test.QuickCheck
+
 newtype Tablename = Tablename String deriving(Ord, Eq, Show, Read)
 newtype ErrString = ErrString String deriving(Show)
 
 data Database = Database { database :: Map Tablename (TVar Table) }
 data Fieldname = Fieldname String deriving(Ord, Eq, Show, Read)
+
+instance Arbitrary Fieldname where
+  arbitrary = elements [Fieldname "gdgdfs"]
+
+instance Arbitrary Tablename where
+  arbitrary = elements [Tablename "gdgdfs"]
 
 data Table = Table { rowCounter :: Int 
                    , primaryKey :: Maybe Fieldname 
@@ -51,7 +59,7 @@ instance Ord Element where
 
 data TransactionID = TransactionID { clientName :: String 
                                    , transactionNum :: Int 
-                                   } deriving(Eq, Show, Read)-- clientname, transaction number
+                                   } deriving(Eq, Ord, Show, Read)-- clientname, transaction number
  
 data Row = Row {getField :: Fieldname -> STM(Maybe Element)}
 

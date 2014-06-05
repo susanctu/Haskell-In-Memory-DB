@@ -116,7 +116,6 @@ get_row_for_hash :: Table -> RowHash -> STM(Row)
 get_row_for_hash t rhash = do (_, r) <- construct_row_for_hash (table t) rhash 
                               return r
 
-
 {-Private-}
 get_column:: TVar Database -> Tablename -> Fieldname -> STM(Maybe Column)
 get_column db tablename fieldname = do
