@@ -92,12 +92,13 @@ alter_table_drop db tr_id tablename fieldname = do
 -- so we take all the rowhashes, construct Rows for every row, only keep the ones that we get true for
 -- when we pass them to the (Row -> Bool) function. 
 -- returns the hashes of all the rows we want to show, and the rows themselves 
-get_rows :: L.Map Fieldname Column -> (Row -> Bool)-> STM([RowHash], [Row])
+get_rows :: L.Map Fieldname Column -> (Row -> STM(Bool))-> STM([RowHash], [Row])
 get_rows table_map cond = do
   all_hashes <- let c = head (L.elems table_map) in do col_map <- readTVar $ column c 
                                                        return $ L.keys col_map
   lst_of_tuples <- mapM (construct_row_for_hash table_map) all_hashes 
-  return $ unzip $ filter (\(_, r) -> cond r ) lst_of_tuples
+  filtered <- filterM (\(_, r) -> cond r ) lst_of_tuples
+  return $ unzip $ filtered
 
 {-Private-}
 construct_row_for_hash :: L.Map Fieldname Column -> RowHash -> STM(RowHash, Row)
@@ -160,7 +161,7 @@ construct_col_info t fieldname = case L.lookup fieldname (table t) of
 -- Checks that fieldnames exist in the specified table
 -- Grab the columns then for all the rowhashes that we do not ignore 
 -- Make a Table (using insert_vals) with all those elements and return it
-select :: TVar Database -> Tablename -> [Fieldname] -> (Row -> Bool) -> STM(Either ErrString Table)
+select :: TVar Database -> Tablename -> [Fieldname] -> (Row -> STM(Bool)) -> STM(Either ErrString Table)
 select db tablename show_fieldnames cond =  do
   tvar_table <- get_table db tablename
   case tvar_table of 
@@ -186,7 +187,7 @@ select db tablename show_fieldnames cond =  do
   for the column.
   Also collects and returns the appropriate LogOperations.
 -}
-insert_vals :: TransactionID -> RowHash -> Tablename -> Table -> [Fieldname] -> Row -> [LogOperation] -> STM(Either ErrString (Table, [LogOperation]))
+insert_vals :: TransactionID -> RowHash -> Tablename -> Table -> [Fieldname] -> Row -> [LogOperation] -> STM(Either ErrString (Table, [(Fieldname,Element)]))
 insert_vals tr_id rowhash tablename t (f:fieldnames) row logOps = do
   maybe_elem <- (getField row) f
   case maybe_elem of 
@@ -205,14 +206,14 @@ insert_vals tr_id rowhash tablename t (f:fieldnames) row logOps = do
 insert_vals _ _ _ t _ _ logOps = return $ Right (t, logOps)
 
 {-Private-}
-insert_val_helper :: TransactionID -> RowHash -> Tablename -> Table -> Fieldname -> Element -> STM (Either ErrString (Table, LogOperation)) 
-insert_val_helper tr_id rowhash tablename t f new_elem = let new_logOp = TransactionLog tr_id (tablename, f, rowhash) Nothing (Just new_elem) 
+insert_val_helper :: TransactionID -> RowHash -> Tablename -> Table -> Fieldname -> Element -> STM (Either ErrString (Table, (Fieldname,Element)))) 
+insert_val_helper tr_id rowhash tablename t f new_elem = let new_logOp = (f, new_elem) 
   in case L.lookup f (table t) of
        Just c -> do col_map <- readTVar $ column c
                     new_tvar_elem <- newTVar new_elem
                     new_col_map <- newTVar $ L.insert rowhash new_tvar_elem (col_map)
                     let new_col = Column (default_val c) (col_type c) new_col_map
-                    let new_table = Table (rowCounter t) (primaryKey t) (L.insert f new_col (table t))
+                    let new_table = Table ((rowCounter t) +1) (primaryKey t) (L.insert f new_col (table t))
                     return $ Right (new_table, new_logOp)
        Nothing -> return $ Left (ErrString "DB error")
 
@@ -247,7 +248,7 @@ insert db tr_id tablename row = do
                             case res of 
                               Left err_str -> return $ Left err_str 
                               Right (new_t, logOps) -> do writeTVar x new_t
-                                                          return $ Right logOps
+                                                          return $ Right Insert tr_id (tablename, RowHash((rowCounter t) + 1)) logOps
                     else return $ Left(ErrString ("Failed to provide values for all columns in " ++ show(tablename) ++ " with no default"))
     Nothing -> return $ Left(ErrString (show(tablename) ++ " not found."))    
 
