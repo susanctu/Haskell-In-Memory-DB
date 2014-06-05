@@ -1,5 +1,13 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-module Operation (create_table, drop_table, alter_table_add, alter_table_drop, select, Operation.insert, show_tables, update, delete) where
+module Operation (create_table
+  , drop_table
+  , alter_table_add
+  , alter_table_drop
+  , select
+  , insert
+  , show_tables
+  , update
+  , delete) where
 
 import Control.Monad
 import Control.Concurrent.STM
@@ -267,10 +275,33 @@ printRow :: [Fieldname] -> Row -> STM(String)
 printRow fieldnames row = do maybe_elems <- sequence $ fmap (getField row) fieldnames  
                              return $ unwords $ fmap show maybe_elems 
 
-{- I do not plan on implementing these next two until I get everything else to compile, but these are the intended function prototypes -}
-delete :: TVar Database -> TransactionID -> Tablename -> (Row -> STM Bool) -> STM(Either (ErrString) LogOperation)
-delete db tr_id tablename conds = return $ Left $ ErrString "unimplemented!"
+{-Private-}
+--delete all the hashes from the given column and return the resulting column
+delete_hashes_from_column :: [RowHash] -> (Fieldname, Column) -> STM(Fieldname, Column) 
+delete_hashes_from_column hashes (fieldname, col) = do
+  col_map <- readTVar $ column col 
+  tvar_col <- newTVar (delete_hashes_from_col_map hashes col_map)
+  return (fieldname, Column{default_val=(default_val col), col_type=(col_type col),column=tvar_col})
 
+{-Private-}
+delete_hashes_from_col_map :: [RowHash] -> L.Map RowHash (TVar Element) -> L.Map RowHash (TVar Element) -- could return deleted vals for each hash in that col
+delete_hashes_from_col_map (h:hashes) col_map = delete_hashes_from_col_map hashes $ L.delete h col_map 
+delete_hashes_from_col_map _ col_map = col_map
+
+{-Public-}
+delete :: TVar Database -> TransactionID -> Tablename -> (Row -> STM Bool) -> STM(Either (ErrString) [LogOperation])
+delete db tr_id tablename conds = do
+  tvar_table <- get_table db tablename
+  case tvar_table of 
+    Just x -> do t <- readTVar x -- t is of type Table
+                 (delete_hashes, rows) <- get_rows (table t) conds
+                 let fieldnames = (get_all_fields t)
+                 list_of_list_of_elems <- (sequence $ fmap (\r -> liftM catMaybes (mapM (getField r) fieldnames)) rows)::STM([[Element]])
+                 list_for_table_map <- mapM (delete_hashes_from_column delete_hashes) $ L.toList(table t)
+                 let new_table_map = L.fromList list_for_table_map
+                 writeTVar x Table{rowCounter=(rowCounter t), primaryKey=(primaryKey t), table=new_table_map}
+                 return $ Right $ fmap (\(hash, list_of_elems) -> Delete tr_id (tablename, hash) (zip fieldnames list_of_elems)) $ zip delete_hashes list_of_list_of_elems      
+    Nothing -> return $ Left $ ErrString (show(tablename) ++ " not found.")
  
 update :: TVar Database -> TransactionID -> Tablename -> (Row -> STM Bool) -> (Row -> Row) -> STM (Either ErrString LogOperation)
 update db tr_id tablename conds changes = return $ Left $ ErrString "unimplemented!"
