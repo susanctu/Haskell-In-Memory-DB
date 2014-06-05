@@ -7,7 +7,7 @@ module Server (
 import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Exception (bracket)
-import Control.Monad (liftM)
+import Control.Monad
 
 import qualified Data.ByteString as B
 import Data.List (findIndex)
@@ -27,7 +27,7 @@ import Operation
 
 type QueryResult = Either ErrString [LogOperation]
 
--- The following two functions aren't the best designed, but I'm not sure we want to
+{- The following two functions aren't the best designed, but I'm not sure we want to
 -- make the distinction.
 -- char(n) or varchar(n)
 isCharType :: String -> Bool
@@ -38,6 +38,7 @@ isCharType s = take 4 s == "char" || take 7 s == "varchar"
 -- bit(n) or bitvarying(n)
 isBitType :: String -> Bool
 isBitType s = take 3 s == "bit" -- since there are only so many types
+-}
 
 -- True, False, or Unknown... blah.
 -- everything else is done just with read...
@@ -58,13 +59,14 @@ detectPrimaryKey fieldInfo = case (filter (\args -> head (words args) == "PRIMAR
     x:_ -> Just $ Fieldname $ (words x) !! 2 -- since it's of the form PRIMARY KEY fieldname
     []    -> Nothing
 
-readType :: String -> TypeRep
+{-readType :: String -> TypeRep
 readType ftype
     | ftype == "boolean" = typeOf(undefined :: Bool)
     | isCharType ftype || isBitType ftype = typeOf(undefined :: B.ByteString)
     | ftype == "integer" = typeOf(undefined :: Int32)
     | ftype == "real"    = typeOf(undefined :: Double)
     | otherwise = typeOf(undefined :: B.ByteString)
+-}
 
 --inelegant, but sort-of polymorphism.
 getBool :: Maybe String -> Maybe Bool
@@ -150,27 +152,66 @@ check_parens elems = (count elems 0) == 0
                                                    | otherwise = n
                              in count xs $ foldr increment_count n x
 
+-- interpret the right side of an atomic condition as a string,
+-- an integer, or a fieldname.
+isConstantConstraint :: String -> Bool
+isConstantConstraint s
+	| '0' <= head s && head s <= '9' = True
+	| head s == '"'					 = True
+	| head s == '\''				 = True
+	| otherwise						 = False
+
+-- difficulty here is reading the type without access to the table...
+{-createOp :: String -> String -> String -> M.Map Fieldname (Element -> Bool)
+createOp op left right = singleton left fn
+	where fn a = case op of
+    ">"  -> a > 
+    "<"  ->
+    ">=" ->
+    "<=" ->
+    "==" ->
+	-- only work on strings, but we can tell the type...
+    "in" ->
+    "contains" -> -}
+createOp = undefined
+
 transform :: [String] -> [Either String (M.Map Fieldname (Element -> Bool))]
 transform []        = []
 transform (e:es) = process e ++ transform es
     where process str | null str                           = []
                       | str == "and" || str == "or"        = [Left str]
                       | head str == '(' || head str == ')' = (Left [head str] : process (tail str))
-                      | (left : op : right : rem) <-  str  = Right --stuff
+                      | (left : op : right : rem) <-  str  = (Right (createOp op left right) : process rem)
                       | otherwise                          = []
 
+-- utility needed for findIndex, below
+leftEq :: String -> Either String a -> Bool
+leftEq _ (Right _) = False
+leftEq s (Left t)  = s == t
+
+findParens :: [Either String (M.Map Fieldname (Element -> Bool))] -> Maybe (Int, Int)
+findParens es = do
+	firstLeft <- findIndex (leftEq "(") es
+	nextRight <- (liftM2 (\a b -> a + b)) (Just $ 1+firstLeft) $ findIndex (leftEq ")") (drop (1+firstLeft) es)
+	prevLeft <- (liftM2 (\a b -> a - b)) (Just $ length es) $ findIndex (leftEq"(") (drop (length es - nextRight) $ reverse es)
+	return (prevLeft, nextRight)
+
+-- need to replace elem with something that only compares on the left.
 merge :: [Either String (M.Map Fieldname (Element -> Bool))] -> M.Map Fieldname (Element -> Bool)
-merge es | elem (Left "(") es   = let (start, end) = find_parens es in merge $ (take start es) ++ merge (drop (start+1) (take (end) es)) ++ (drop (end+1) es)
-                                                     where find_parens es = --stuff
-         | elem (Left "and") es = --stuff
-         | elem (Left "or") es  = --stuff
+merge es | elem (Left "(") es   =
+        case findParens es of
+			Just (start, end) ->
+				merge $ (take start es) ++ ([Right $ merge (drop (start+1) (take (end) es))]) ++ (drop (end+1) es)
+			Nothing -> M.empty
+         | elem (Left "and") es = undefined
+         | elem (Left "or") es  = undefined
          | null es              = M.empty
          | (Right e:[]) <- es   = e
 
 parse_predicate :: String -> Row -> STM Bool
 parse_predicate cond = let elems = split cond
                          in if check_parens elems then verify_row $ M.toList $ merge $ transform elems
-                                                  else (\_ -> False)
+                                                  else (\_ -> do return False)
 -- This is parsed as INSERT INTO tablename(fieldname) VALUES values
 -- I'm pretty sure this needs to be reworked.
 {-insert_util :: TVar Database -> TransactionID -> String -> String -> STM QueryResult
