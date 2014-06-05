@@ -187,7 +187,7 @@ select db tablename show_fieldnames cond =  do
   for the column.
   Also collects and returns the appropriate LogOperations.
 -}
-insert_vals :: TransactionID -> RowHash -> Tablename -> Table -> [Fieldname] -> Row -> [LogOperation] -> STM(Either ErrString (Table, [(Fieldname,Element)]))
+insert_vals :: TransactionID -> RowHash -> Tablename -> Table -> [Fieldname] -> Row -> [(Fieldname, Element)] -> STM(Either ErrString (Table, [(Fieldname,Element)]))
 insert_vals tr_id rowhash tablename t (f:fieldnames) row logOps = do
   maybe_elem <- (getField row) f
   case maybe_elem of 
@@ -206,7 +206,7 @@ insert_vals tr_id rowhash tablename t (f:fieldnames) row logOps = do
 insert_vals _ _ _ t _ _ logOps = return $ Right (t, logOps)
 
 {-Private-}
-insert_val_helper :: TransactionID -> RowHash -> Tablename -> Table -> Fieldname -> Element -> STM (Either ErrString (Table, (Fieldname,Element)))) 
+insert_val_helper :: TransactionID -> RowHash -> Tablename -> Table -> Fieldname -> Element -> STM (Either ErrString (Table, (Fieldname,Element))) 
 insert_val_helper tr_id rowhash tablename t f new_elem = let new_logOp = (f, new_elem) 
   in case L.lookup f (table t) of
        Just c -> do col_map <- readTVar $ column c
@@ -237,7 +237,7 @@ check_defaults row fname bool = liftM (bool &&) $ liftM isNothing ((getField row
   * user names the same column twice 
   * user names an invalid column
 -}
-insert :: TVar Database -> TransactionID -> Tablename -> Row -> STM(Either ErrString [LogOperation]) 
+insert :: TVar Database -> TransactionID -> Tablename -> Row -> STM(Either ErrString LogOperation) 
 insert db tr_id tablename row = do
   tvar_table <- get_table db tablename
   case tvar_table of 
@@ -248,7 +248,7 @@ insert db tr_id tablename row = do
                             case res of 
                               Left err_str -> return $ Left err_str 
                               Right (new_t, logOps) -> do writeTVar x new_t
-                                                          return $ Right Insert tr_id (tablename, RowHash((rowCounter t) + 1)) logOps
+                                                          return $ Right $ Insert tr_id (tablename, RowHash((rowCounter t) + 1)) logOps
                     else return $ Left(ErrString ("Failed to provide values for all columns in " ++ show(tablename) ++ " with no default"))
     Nothing -> return $ Left(ErrString (show(tablename) ++ " not found."))    
 
