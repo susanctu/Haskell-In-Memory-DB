@@ -59,6 +59,14 @@ data TransactionID = TransactionID { clientName :: String
  
 data Row = Row {getField :: Fieldname -> STM(Maybe Element)}
 
+construct_row :: [(Fieldname, Element)] -> Row
+construct_row content = return . (flip lookup content)
+
+verify_row :: [(Fieldname, Element->Bool)] -> Row -> STM Bool
+verify_row content row = foldR (liftM2 (&&)) (return True) $ zipWith liftM (map (evaluate . snd) content) $ map (getField row) (map fst content) 
+    where evaluate f Nothing = False
+          evaluate f Just x  = f x
+
 newtype RowHash = RowHash Int deriving(Show, Read, Eq, Ord) 
 data LogOperation = Start TransactionID
                   | Insert TransactionID (Tablename, RowHash) [(Fieldname, Element)]
