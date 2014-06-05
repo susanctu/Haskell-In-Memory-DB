@@ -1,4 +1,4 @@
-name:           hmdb
+name:           hidb
 version:        0.0.1
 synopsis:       In-memory database (CS 240H Final Project)
 build-type:     Simple
@@ -29,11 +29,11 @@ library
   default-language: Haskell2010
   ghc-options: -Wall
 
-executable hmdb
+executable hidb
   main-is: Main.hs
   build-depends:
     base < 5
-    , hmdb
+    , hidb
   ghc-options: -Wall
 
 test-suite test-operation
@@ -41,7 +41,7 @@ test-suite test-operation
   main-is: TestOperation.hs
   build-depends:
     base < 5
-    , hmdb
+    , hidb
     , containers
     , stm > 2.4
     , QuickCheck > 2.7
