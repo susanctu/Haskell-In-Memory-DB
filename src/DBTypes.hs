@@ -35,27 +35,9 @@ instance Show Element where
 instance Read Element where
   readsPrec _ str = [(fst (head (readsPrec 0 str)),"")]
 
-{-How do this correctly?-}
 instance Eq Element where
-  (Element x) == (Element y) | typeOf(x) /= typeOf(y)           = False
-                             | Just x_val <- x, Just y_val <- y = case (cast x_val) of Just typed_x_val -> typed_x_val == y
-                                                                                       Nothing          -> False
-                             | Nothing <- x, Nothing <- y       = True
-                             | otherwise                        = False
-
-{-  (Element x)==(Element y)= case x of 
-                              Just a -> case y of 
-                                          Just b -> if typeOf a == typeOf b
-                                                      then (a == b)
-                                                      else False
-                                          Nothing -> False
-                              Nothing -> case y of 
-                                           Just _ -> False
-                                           Nothing -> True
-                    
-
-instance Ord Element where 
- -}
+  (Element mx) == (Element my) = case cast mx of Just typed_mx -> typed_mx == my
+                                                 Nothing       -> False
 
 data TransactionID = TransactionID { clientName :: String 
                                    , transactionNum :: Int 
@@ -70,6 +52,13 @@ verify_row :: [(Fieldname, Element->Bool)] -> Row -> STM Bool
 verify_row content row = foldr (liftM2 (&&)) (return True) $ zipWith liftM (map (evaluate . snd) content) $ map (getField row) (map fst content) 
     where evaluate f Nothing   = False
           evaluate f (Just x)  = f x
+
+transform_row :: [(Fieldname, Element -> Element)] -> Row -> Row
+transform_row content row = let transformed = zip (map fst content) $ zipWith liftM (map (evaluate . snd) content) $ map (getField row) (map fst content) --type is [(Fieldname, STM Maybe Element)]
+                              in Row $ \f -> case lookup f transformed of Just x  -> x
+                                                                          Nothing -> return Nothing
+    where evaluate f Nothing  = Nothing
+          evaluate f (Just x) = Just (f x)
 
 newtype RowHash = RowHash Int deriving(Show, Read, Eq, Ord) 
 data LogOperation = Start TransactionID
