@@ -57,7 +57,9 @@ data Row = Row {getField :: Fieldname -> STM(Maybe Element)}
 
 newtype RowHash = RowHash Int deriving(Show, Read, Eq, Ord) 
 data LogOperation = Start TransactionID
-                  | TransactionLog TransactionID (Tablename, Fieldname, RowHash) (Maybe Element) (Maybe Element) -- last two are old val, new val
+                  | Insert TransactionID (Tablename, RowHash) [(Fieldname, Element)]
+                  | Delete TransactionID (Tablename, RowHash) [(Fieldname, Element)]
+                  | Update TransactionID (Tablename, RowHash) [(Fieldname, Element, Element)] -- last two are old val, new val
                   | Commit TransactionID  
                   | StartCheckpoint [TransactionID]   
                   | EndCheckpoint

@@ -38,20 +38,18 @@ run_checkpoint db l active = do threadDelay 30000000 --thirty seconds
 	          writeChan l EndCheckpoint
 
 undo :: TVar Database -> [LogOperations] -> IO (Set TransactionID)
-undo db ops = do unwrapped_db <- readTVarIO db
-                 undo_with_tracking unwrapped_db ops (Set.empty :: Set TransactionID)
-    where undo_with_tracking db ops committed | (o:os) <- ops  = process db o committed >>= undo_with_tracking db os
-                                              | otherwise      = return committed
-              where process db op committed | Commit trans_id <- op = return $ insert trans_id committed 
-                                            | TransactionLog
-                                            | otherwise             = return committed
+undo db ops = foldr (process db) (return Set.empty) ops
+    where process db op committed | Commit trans_id <- op = committed >>= return $ Set.insert trans_id
+                                  | TransactionLog trans_id (table, field, row) old_val new_val = do
+                                  	    
+                                  | otherwise = committed
                  
 
 
 redo :: TVar Database -> [LogOperations] -> Set (TransactionID) -> IO ()
 
 recover :: TVar Database -> [LogOperations] -> IO ()
-recover db ops = committed <- undo db $ reverse ops
+recover db ops = committed <- undo db ops
                  redo db ops committed
 
 read_db :: IO (TVar Database)
