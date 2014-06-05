@@ -1,5 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-module Operation (create_table, drop_table, alter_table_add, alter_table_drop, select, Operation.insert, show_tables) where
+module Operation (create_table, drop_table, alter_table_add, alter_table_drop, select, Operation.insert, show_tables, update, delete) where
 
 import Control.Monad
 import Control.Concurrent.STM
@@ -268,12 +268,12 @@ printRow fieldnames row = do maybe_elems <- sequence $ fmap (getField row) field
                              return $ unwords $ fmap show maybe_elems 
 
 {- I do not plan on implementing these next two until I get everything else to compile, but these are the intended function prototypes -}
-{-delete :: TVar Database -> TransactionID -> Tablename -> (Row -> Bool) -> STM(Either (ErrString) LogOperation)
-delete db tr_id tablename conds =
+delete :: TVar Database -> TransactionID -> Tablename -> (Row -> STM Bool) -> STM(Either (ErrString) LogOperation)
+delete db tr_id tablename conds = return $ Left $ ErrString "unimplemented!"
 
  
-update :: TVar Database -> TransactionID -> Tablename -> (Row -> Bool) -> (Row -> Row) -> STM (Either ErrString LogOperation)
-update db tr_id tablename conds changes =-}
+update :: TVar Database -> TransactionID -> Tablename -> (Row -> STM Bool) -> (Row -> Row) -> STM (Either ErrString LogOperation)
+update db tr_id tablename conds changes = return $ Left $ ErrString "unimplemented!"
 
 {-Public-}
 show_tables :: TVar Database -> STM (String) -- doesn't actually update the db, so no need for logstring

@@ -3,6 +3,7 @@
 {-# LANGUAGE RankNTypes #-}
 
 {- Exporting all types, constructors, and accessors -}
+
 module DBTypes (Tablename(..)
   , ErrString(..)
   , Database(..)
@@ -16,7 +17,10 @@ module DBTypes (Tablename(..)
   , Row(..)
   , Log(..)
   , ActiveTransactions(..)
-  , verify_row) where
+  , construct_row
+  , verify_row
+  ,transform_row) where
+
 
 import Data.Typeable 
 import Control.Concurrent.STM
