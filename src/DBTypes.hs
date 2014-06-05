@@ -3,7 +3,24 @@
 {-# LANGUAGE RankNTypes #-}
 
 {- Exporting all types, constructors, and accessors -}
-module DBTypes (Tablename(..), ErrString(..), Database(..), Fieldname(..), Table(..), Column(..), Element(..), TransactionID(..), RowHash(..), LogOperation(..), Row(..), Log(..), ActiveTransactions(..)) where
+
+module DBTypes (Tablename(..)
+  , ErrString(..)
+  , Database(..)
+  , Fieldname(..)
+  , Table(..)
+  , Column(..)
+  , Element(..)
+  , TransactionID(..)
+  , RowHash(..)
+  , LogOperation(..)
+  , Row(..)
+  , Log(..)
+  , ActiveTransactions(..)
+  , construct_row
+  , verify_row
+  ,transform_row) where
+
 
 import Data.Typeable 
 import Control.Concurrent.STM
