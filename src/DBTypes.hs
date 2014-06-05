@@ -7,8 +7,10 @@ module DBTypes (Tablename(..), ErrString(..), Database(..), Fieldname(..), Table
 
 import Data.Typeable 
 import Control.Concurrent.STM
-import Data.Map.Lazy
 import Control.Concurrent.Chan
+import Control.Monad
+import Data.Map.Lazy (Map)
+import Data.Set (Set)
  
 newtype Tablename = Tablename String deriving(Ord, Eq, Show, Read)
 newtype ErrString = ErrString String deriving(Show)
@@ -35,9 +37,11 @@ instance Read Element where
 
 {-How do this correctly?-}
 instance Eq Element where
-  '==' (Element x) (Element y) | Just x_val <- x, Just y_val <- y = x == y
-                               | Nothing <- x, Nothing <- y       = True
-                               | otherwise                        = False
+  (Element x) == (Element y) | typeOf(x) /= typeOf(y)           = False
+                             | Just x_val <- x, Just y_val <- y = case (cast x_val) of Just typed_x_val -> typed_x_val == y
+                                                                                       Nothing          -> False
+                             | Nothing <- x, Nothing <- y       = True
+                             | otherwise                        = False
 
 {-  (Element x)==(Element y)= case x of 
                               Just a -> case y of 
@@ -60,12 +64,12 @@ data TransactionID = TransactionID { clientName :: String
 data Row = Row {getField :: Fieldname -> STM(Maybe Element)}
 
 construct_row :: [(Fieldname, Element)] -> Row
-construct_row content = return . (flip lookup content)
+construct_row content = Row $ return . (flip lookup content)
 
 verify_row :: [(Fieldname, Element->Bool)] -> Row -> STM Bool
 verify_row content row = foldr (liftM2 (&&)) (return True) $ zipWith liftM (map (evaluate . snd) content) $ map (getField row) (map fst content) 
-    where evaluate f Nothing = False
-          evaluate f Just x  = f x
+    where evaluate f Nothing   = False
+          evaluate f (Just x)  = f x
 
 newtype RowHash = RowHash Int deriving(Show, Read, Eq, Ord) 
 data LogOperation = Start TransactionID
