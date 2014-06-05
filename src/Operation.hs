@@ -252,6 +252,21 @@ insert db tr_id tablename row = do
                     else return $ Left(ErrString ("Failed to provide values for all columns in " ++ show(tablename) ++ " with no default"))
     Nothing -> return $ Left(ErrString (show(tablename) ++ " not found."))    
 
+{-Public-}
+show_table_contents :: Table -> STM(String)
+show_table_contents t = let pk = show(primaryKey t) 
+                            fieldnames = L.keys $ table t
+                            scheme = fmap show $ fieldnames 
+                            in do (_, rows) <- get_rows (table t) (verify_row (fmap (\f -> (f, func)) fieldnames)) 
+                                  row_strs <- sequence $ fmap (printRow fieldnames) rows 
+                                  return $ "Primary key:" ++ pk ++ "\n" ++ unwords(scheme) ++ "\n" ++ unlines(row_strs)
+                               where func element = True
+
+{-Private-}
+printRow :: [Fieldname] -> Row -> STM(String)
+printRow fieldnames row = do maybe_elems <- sequence $ fmap (getField row) fieldnames  
+                             return $ unwords $ fmap show maybe_elems 
+
 {- I do not plan on implementing these next two until I get everything else to compile, but these are the intended function prototypes -}
 {-delete :: TVar Database -> TransactionID -> Tablename -> (Row -> Bool) -> STM(Either (ErrString) LogOperation)
 delete db tr_id tablename conds =
