@@ -14,6 +14,7 @@ import Data.List (findIndex)
 import Data.List.Split (splitOneOf)
 import Data.Int
 import qualified Data.Set as S
+import qualified Data.Map as M
 import Data.Typeable
 
 --import System.Random
@@ -50,7 +51,7 @@ obtainDefault :: [String] -> Maybe String
 obtainDefault xs
     | length xs <  4 = Nothing
     | length xs >= 4 = Just $ xs !! 3
-	| otherwise		 = Nothing
+    | otherwise      = Nothing
 
 detectPrimaryKey :: [String] -> Maybe Fieldname
 detectPrimaryKey fieldInfo = case (filter (\args -> head (words args) == "PRIMARY") fieldInfo) of
@@ -59,11 +60,11 @@ detectPrimaryKey fieldInfo = case (filter (\args -> head (words args) == "PRIMAR
 
 readType :: String -> TypeRep
 readType ftype
-	| ftype == "boolean" = typeOf(undefined :: Bool)
-	| isCharType ftype || isBitType ftype = typeOf(undefined :: B.ByteString)
-	| ftype == "integer" = typeOf(undefined :: Int32)
-	| ftype == "real"	 = typeOf(undefined :: Double)
-	| otherwise = typeOf(undefined :: B.ByteString)
+    | ftype == "boolean" = typeOf(undefined :: Bool)
+    | isCharType ftype || isBitType ftype = typeOf(undefined :: B.ByteString)
+    | ftype == "integer" = typeOf(undefined :: Int32)
+    | ftype == "real"    = typeOf(undefined :: Double)
+    | otherwise = typeOf(undefined :: B.ByteString)
 
 --inelegant, but sort-of polymorphism.
 getBool :: Maybe String -> Maybe Bool
@@ -99,8 +100,8 @@ createField fieldInfo
     -- I guess there should be a bitstring type. Derive from ByteString, somehow...?
     | ftype == "integer"    = (name, setupDefault (getInt32 df), typeOf(undefined :: Int32))
     | ftype == "real"       = (name, setupDefault (getDouble df), typeOf(undefined :: Double))
-	-- do we care enough to make this the default?
-	| otherwise				= (name, setupDefault (getByteString df), typeOf(undefined :: B.ByteString))
+    -- do we care enough to make this the default?
+    | otherwise             = (name, setupDefault (getByteString df), typeOf(undefined :: B.ByteString))
     where args  = words fieldInfo
           name  = Fieldname $ args !! 0
           ftype = args !! 1
@@ -132,6 +133,44 @@ alter_drop_util db tID tableStr fieldStr = do
         fieldname = Fieldname fieldStr
     alter_table_drop db tID tablename fieldname
 
+split :: String -> [String]
+split cond = let split_delim delim strs = concat $ map (split_str_delim delim) strs
+               in split_delim "!=<>" $ split_delim "()" $ words cond
+    where split_str_delim :: String -> String -> [String]
+          split_str_delim delim [] = []
+          split_str_delim delim str = (\(a,b) -> (a : split_str_delim delim b)) $
+                                        span (\a -> elem a delim == elem (head str) delim) str
+
+check_parens :: [String] -> Bool
+check_parens elems = (count elems 0) == 0
+    where count [] n     = n
+          count (x:xs) n = let increment_count c n | n < 0     = n
+                                                   | c == '('  = n+1
+                                                   | c == ')'  = n-1
+                                                   | otherwise = n
+                             in count xs $ foldr increment_count n x
+
+transform :: [String] -> [Either String (M.Map Fieldname (Element -> Bool))]
+transform []        = []
+transform (e:es) = process e ++ transform es
+    where process str | null str                           = []
+                      | str == "and" || str == "or"        = [Left str]
+                      | head str == '(' || head str == ')' = (Left [head str] : process (tail str))
+                      | (left : op : right : rem) <-  str  = Right --stuff
+                      | otherwise                          = []
+
+merge :: [Either String (M.Map Fieldname (Element -> Bool))] -> M.Map Fieldname (Element -> Bool)
+merge es | elem (Left "(") es   = let (start, end) = find_parens es in merge $ (take start es) ++ merge (drop (start+1) (take (end) es)) ++ (drop (end+1) es)
+                                                     where find_parens es = --stuff
+         | elem (Left "and") es = --stuff
+         | elem (Left "or") es  = --stuff
+         | null es              = M.empty
+         | (Right e:[]) <- es   = e
+
+parse_predicate :: String -> Row -> STM Bool
+parse_predicate cond = let elems = split cond
+                         in if check_parens elems then verify_row $ M.toList $ merge $ transform elems
+                                                  else (\_ -> False)
 -- This is parsed as INSERT INTO tablename(fieldname) VALUES values
 -- I'm pretty sure this needs to be reworked.
 {-insert_util :: TVar Database -> TransactionID -> String -> String -> STM QueryResult
@@ -176,7 +215,7 @@ commandWrapper db tID cmds prtResults = do
     case queryResult of
         Left errStr -> return (prtResults, Just errStr) -- no further computations should be done.
         Right logVal -> do
-			commandWrapper db tID (tail cmds) (prtResults ++ logVal)
+            commandWrapper db tID (tail cmds) (prtResults ++ logVal)
 
 -- "atomic action" sounds like the name of an environmental protest group.
 {- This function takes care of the logistics behind executing an atomic block
@@ -222,7 +261,7 @@ executeRequests _ _ _ _ [] = return Nothing
 executeRequests db transSet logger tID cmds = do
     case findIndex altersTable cmds of
         Just 0 -> do -- the first request alters the table.
-		-- hmm do I care that these are being thrown away?
+        -- hmm do I care that these are being thrown away?
             result <- actReq [head cmds] -- agg. Then what?
             recurseReq $ tail cmds
         Just n -> do -- the (n+1)st request alters the table, but the first n don't.
@@ -235,10 +274,10 @@ executeRequests db transSet logger tID cmds = do
 
 readCmds :: Handle -> [String] -> IO [String]
 readCmds h arr = do
-	s <- hGetLine h
-	if s == "STOP"
-	then return arr
-	else readCmds h $ arr ++ [s]
+    s <- hGetLine h
+    if s == "STOP"
+    then return arr
+    else readCmds h $ arr ++ [s]
 
 -- loops a session with a single client. Runs in its own thread.
 -- TODO error-handling.

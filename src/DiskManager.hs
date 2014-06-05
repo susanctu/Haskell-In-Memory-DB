@@ -19,8 +19,6 @@ log_file = special_folder </> ".log"
 
 write_db :: Database -> IO ()
 write_db db = return ()
---write_all $ Map.keys $ database db
---              where write_all tablenames = mapM_ (write_table db) tablenames
 
 flush_log :: Log -> IO ()
 flush_log l = do l_copy <- atomically $ dupTChan l
