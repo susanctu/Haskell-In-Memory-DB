@@ -6,6 +6,7 @@ module Operation (create_table
   , select
   , insert
   , show_tables
+  , show_table_data
   , update
   , delete) where
 
@@ -262,6 +263,15 @@ insert db tr_id tablename row = do
     Nothing -> return $ Left(ErrString (show(tablename) ++ " not found."))    
 
 {-Public-}
+show_table_data :: TVar Database -> Tablename -> STM (String)
+show_table_data db tablename = do 
+  maybe_table <- get_table db tablename 
+  case maybe_table of 
+    Just tvar_table -> do t <- readTVar tvar_table
+                          show_table_contents t 
+    Nothing -> return ""
+
+{-Private-}
 show_table_contents :: Table -> STM(String)
 show_table_contents t = let pk = show(primaryKey t) 
                             fieldnames = L.keys $ table t
@@ -304,55 +314,36 @@ delete db tr_id tablename conds = do
                  return $ Right $ fmap (\(hash, list_of_elems) -> Delete tr_id (tablename, hash) (zip fieldnames list_of_elems)) $ zip delete_hashes list_of_list_of_elems      
     Nothing -> return $ Left $ ErrString (show(tablename) ++ " not found.")
 
-{-Private-}
--- returns the new values as well 
-change_rows_from_column :: Table -> [RowHash] -> (Row -> Row) -> (Fieldname, Column) -> STM((Fieldname, Column), [Element]) 
-change_rows_from_column t hashes changes (fieldname, col) = do
-  col_map <- readTVar $ column col 
-  (new_col_map, new_elems) <- change_rows_from_col_map t hashes changes col_map []
-  tvar_col <- newTVar (new_col_map)
-  return ((fieldname, Column{default_val=(default_val col), col_type=(col_type col),column=tvar_col}), new_elems)
 
-{-Private-}
-update_map :: (Element -> STM(Maybe Element)) -> RowHash -> L.Map RowHash (TVar Element) ->STM(L.Map RowHash (TVar Element), Element)
-update_map func hash col_map = case L.lookup hash col_map of
-  Just tvar_elem -> do old_elem <- readTVar tvar_elem
-                       maybe_new_elem <- func old_elem 
-                       case maybe_new_elem of 
-                         Just new_elem -> do new_tvar_elem <- newTVar new_elem
-                                             return $ (L.insert hash new_tvar_elem col_map, new_elem)  
-                         Nothing -> return $ (col_map, old_elem)
-  Nothing -> return (col_map, Element(Nothing::Maybe Int)) -- should not happen!
+change_in_col:: Table -> (Row -> Row) -> RowHash -> Row -> Fieldname -> STM(Maybe (Fieldname, Element, Element))
+change_in_col t change rh r fieldname = case L.lookup fieldname (table t) of
+  Just col -> do col_map <- readTVar $ column col
+                 case L.lookup rh col_map of 
+                   Just tvar_elem -> do old_element <- readTVar tvar_elem
+                                        maybe_elem <- (getField (change r)) fieldname 
+                                        case maybe_elem of 
+                                          Just new_element -> do writeTVar tvar_elem new_element
+                                                                 return $ Just (fieldname, old_element, new_element)  
+                                          Nothing -> return Nothing  
+                   Nothing -> return Nothing
+  Nothing -> return Nothing
 
-{-Private-}
-change_rows_from_col_map :: Table -> [RowHash] -> (Row -> Row) -> L.Map RowHash (TVar Element) -> [Element] -> STM(L.Map RowHash (TVar Element), [Element]) -- could return deleted vals for each hash in that col
-change_rows_from_col_map t (h:hashes) changes col_map new_elems = do 
-  (new_col_map, element_list) <- update_map func h col_map
-  change_rows_from_col_map t hashes changes new_col_map (element_list:new_elems)
-  where func a = do (rowhash, old_row) <- construct_row_for_hash (table t) h
-                    let new_row = changes old_row 
-                    old_elems <- sequence $ fmap (getField old_row) $ get_all_fields t
-                    new_elems <- sequence $ fmap (getField new_row) $ get_all_fields t
-                    case M.find (\(old_e, new_e) -> Just a == old_e) (zip old_elems new_elems) of 
-                      Just (_, new_element) -> return $ new_element 
-                      Nothing -> return Nothing 
-change_rows_from_col_map _ _ _ col_map new_elems = return (col_map, new_elems)
+update_row :: TransactionID -> Tablename -> Table -> (Row -> Row) -> (RowHash, Row) -> STM(LogOperation)
+update_row tr_id tablename t change (rh, r) = let fieldnames = get_all_fields t 
+                                  in do update_list <- sequence $ fmap (change_in_col t change rh r) fieldnames
+                                        return $ Update tr_id (tablename, rh) $ catMaybes update_list 
 
 {-Public-}
+--
+--
 update :: TVar Database -> TransactionID -> Tablename -> (Row -> STM Bool) -> (Row -> Row) -> STM (Either ErrString [LogOperation])
 update db tr_id tablename conds changes = do
   tvar_table <- get_table db tablename
   case tvar_table of 
     Just x -> do t <- readTVar x -- t is of type Table
-                 (change_hashes, rows) <- get_rows (table t) conds
-                 let fieldnames = (get_all_fields t)
-                 -- get the old values: 
-                 list_of_list_of_elems <- (sequence $ fmap (\r -> liftM catMaybes (mapM (getField r) fieldnames)) rows)::STM([[Element]])
-                 res <- mapM (change_rows_from_column t change_hashes changes) $ L.toList(table t)
-                 let (list_for_table_map, new_elements) = unzip res
-                 let new_table_map = L.fromList list_for_table_map
-                 writeTVar x Table{rowCounter=(rowCounter t), primaryKey=(primaryKey t), table=new_table_map}
-                 return $ Right $ fmap (\(hash, list_of_old_elems, list_of_new_elems) -> Update tr_id (tablename, hash) (zip3 fieldnames list_of_old_elems list_of_new_elems)) $ zip3 change_hashes list_of_list_of_elems new_elements     
+                 hashes_and_rows <- get_rows (table t) conds
+                 log_ops <- sequence $ fmap (update_row tr_id tablename t changes) $ zip (fst hashes_and_rows) (snd hashes_and_rows)
+                 return $ Right log_ops
     Nothing -> return $ Left $ ErrString (show(tablename) ++ " not found.")
 
 {-Public-}
