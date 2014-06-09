@@ -39,10 +39,10 @@ data Database = Database { database :: Map Tablename (TVar Table) }
 data Fieldname = Fieldname String deriving(Ord, Eq, Show, Read)
 
 instance Arbitrary Fieldname where
-  arbitrary = elements [Fieldname "gdgdfs"]
+  arbitrary = fmap Fieldname (arbitrary :: Gen String)
 
 instance Arbitrary Tablename where
-  arbitrary = elements [Tablename "gdgdfs"]
+  arbitrary = fmap Tablename (arbitrary :: Gen String)
 
 data Table = Table { rowCounter :: Int 
                    , primaryKey :: Maybe Fieldname 
