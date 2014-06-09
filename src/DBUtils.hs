@@ -1,5 +1,5 @@
 module DBUtils (construct_row, verify_row, transform_row,
-                output_table, read_table,
+                 read_table,
                 isCharType, isBitType, readType)
 where
 
@@ -20,13 +20,13 @@ data ShowableColumn = ShowableColumn { default_val :: Maybe Element
                                      , col_type :: String
                                      , column :: Map.Map RowHash Element} deriving (Show,Read)
 
-output_table :: Table -> IO String
+{-output_table :: Table -> IO String
 output_table table = atomically $ do showable <- from_table table
-                                     return $ show showable
+                                     return $ show showable-}
 
 --colToTable :: TVar(Map RowHash (TVar Element) -> STM (Map.Map RowHash Element)
 
-from_table :: Table -> STM ShowableTable
+{- from_table :: Table -> STM ShowableTable
 from_table tab = do
     let stage1 = map (\(f, c) -> (f, from_column c)) $ Map.toList $ DBTypes.table tab
         stage2 = map (\(f, stc) -> do
@@ -36,7 +36,7 @@ from_table tab = do
     return $ ShowableTable (DBTypes.rowCounter tab) (DBTypes.primaryKey tab) colMap
 
 from_column :: Column -> STM ShowableColumn
-from_column = undefined
+from_column = undefined -}
 {-from_column col = do
     colData' <- readTVar $ column col
     colData <- 

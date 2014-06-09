@@ -6,7 +6,7 @@ module Operation (create_table
   , select
   , insert
   , show_tables
-  , show_table_data
+  , show_table_contents
   , update
   , delete) where
 
@@ -27,6 +27,7 @@ constructTableMap ((fname, default_val_arg, col_type_arg):xs) old_map = do
 constructTableMap _ old_map = return old_map
 
 {-Public-}
+-- Warning: we don't check again that the default value and the typerep are consistent
 create_table :: TVar Database -> TransactionID -> Tablename -> [(Fieldname, Maybe Element, TypeRep)] -> Maybe Fieldname -> STM (Either ErrString [LogOperation])
 create_table db tr_id tablename field_and_default (Just pk) = if pk `elem` (fmap (\(x,_,_) -> x) field_and_default)
   then create_table_with_validated_pk db tr_id tablename field_and_default (Just pk)
@@ -38,13 +39,13 @@ create_table_with_validated_pk :: TVar Database -> TransactionID -> Tablename ->
 create_table_with_validated_pk db tr_id tablename field_and_default primary_key = do
   hmdb <- readTVar db
   case L.lookup tablename (database hmdb) of 
-           Just _ -> do table_map <- constructTableMap field_and_default L.empty 
-                        tvar_table <- newTVar Table{rowCounter=0, primaryKey=primary_key, table=table_map}
-                        let new_db = L.insert tablename tvar_table (database hmdb)
-                        writeTVar db (Database new_db)
-                        let op = CreateTable tr_id tablename
-                        return $ Right [op, SetPrimaryKey tr_id Nothing primary_key tablename]
-           Nothing -> return $ Left $ ErrString (show(tablename) ++ " already exists.")
+           Nothing -> do table_map <- constructTableMap field_and_default L.empty 
+                         tvar_table <- newTVar Table{rowCounter=0, primaryKey=primary_key, table=table_map}
+                         let new_db = L.insert tablename tvar_table (database hmdb)
+                         writeTVar db (Database new_db)
+                         let op = CreateTable tr_id tablename
+                         return $ Right [op, SetPrimaryKey tr_id Nothing primary_key tablename]
+           Just _ -> return $ Left $ ErrString (show(tablename) ++ " already exists.")
     
 {-Private: Get the specified TVar Table from the database, may return Nothing-}
 get_table :: TVar Database -> Tablename -> STM (Maybe (TVar Table))
@@ -63,6 +64,7 @@ drop_table db tr_id tablename_arg = do
     Nothing -> return $ Left $ ErrString (show(tablename_arg) ++ " not found.")    
 
 {-Public: Add a field to a table, with optional specification of default value and primary key-}
+-- Warning: we don't check again that the default value and the typerep are consistent
 alter_table_add :: TVar Database -> TransactionID -> Tablename -> Fieldname -> TypeRep -> Maybe Element -> Bool -> STM (Either (ErrString) [LogOperation]) 
 alter_table_add db tr_id tablename fieldname col_type default_val is_primary_key = do
   tvar_table <- get_table db tablename
@@ -82,6 +84,7 @@ alter_table_add db tr_id tablename fieldname col_type default_val is_primary_key
     Nothing -> return $ Left $ ErrString (show(tablename) ++ " not found.")    
 
 {- Public -}
+--
 alter_table_drop :: TVar Database -> TransactionID -> Tablename -> Fieldname -> STM (Either (ErrString) [LogOperation])
 alter_table_drop db tr_id tablename fieldname = do
   tvar_table <- get_table db tablename
@@ -176,15 +179,18 @@ select db tablename show_fieldnames cond =  do
   tvar_table <- get_table db tablename
   case tvar_table of 
     Just x -> do t <- readTVar x -- t is of type Table
-                 (show_hashes, rows) <- get_rows (table t) cond
-                 col_info <- sequence $ fmap (construct_col_info t) show_fieldnames -- list of 3-uples
-                 table_map <-  constructTableMap (catMaybes col_info) L.empty
-                 let new_table = Table{rowCounter=(rowCounter t), primaryKey=(primaryKey t), table=table_map}
-                     dummy_id = TransactionID "" 0
-                     in do res <- insert_all_vals dummy_id show_hashes tablename new_table show_fieldnames rows 
-                           case res of
-                             Left str -> return $ Left str
-                             Right filled_table -> return $ Right filled_table
+                 let all_fields = get_all_fields t -- TODO: could make these checks more efficient for large schemas by using a set; worth it?
+                 if all (\f -> f `elem` all_fields) show_fieldnames
+                   then do (show_hashes, rows) <- get_rows (table t) cond
+                           col_info <- sequence $ fmap (construct_col_info t) show_fieldnames -- list of 3-uples
+                           table_map <-  constructTableMap (catMaybes col_info) L.empty
+                           let new_table = Table{rowCounter=(rowCounter t), primaryKey=(primaryKey t), table=table_map}
+                               dummy_id = TransactionID "" 0
+                               in do res <- insert_all_vals dummy_id show_hashes tablename new_table show_fieldnames rows 
+                                     case res of
+                                       Left str -> return $ Left str
+                                       Right filled_table -> return $ Right filled_table
+                   else return $ Left $ ErrString ("Not all fieldnames exist in " ++ show(tablename))                   
     Nothing -> return $ Left $ ErrString (show(tablename) ++ " not found.")
 
 {-Public-}
@@ -263,23 +269,23 @@ insert db tr_id tablename row = do
     Nothing -> return $ Left(ErrString (show(tablename) ++ " not found."))    
 
 {-Public-}
-show_table_data :: TVar Database -> Tablename -> STM (String)
-show_table_data db tablename = do 
+show_table_contents :: TVar Database -> Tablename -> STM (String)
+show_table_contents db tablename = do 
   maybe_table <- get_table db tablename 
   case maybe_table of 
     Just tvar_table -> do t <- readTVar tvar_table
-                          show_table_contents t 
+                          show_table_contents_helper t 
     Nothing -> return ""
 
 {-Private-}
-show_table_contents :: Table -> STM(String)
-show_table_contents t = let pk = show(primaryKey t) 
-                            fieldnames = L.keys $ table t
-                            scheme = fmap show $ fieldnames 
-                            in do (_, rows) <- get_rows (table t) (verify_row (fmap (\f -> (f, func)) fieldnames)) 
-                                  row_strs <- sequence $ fmap (printRow fieldnames) rows 
-                                  return $ "Primary key:" ++ pk ++ "\n" ++ unwords(scheme) ++ "\n" ++ unlines(row_strs)
-                               where func element = True
+show_table_contents_helper :: Table -> STM(String)
+show_table_contents_helper t = let pk = show(primaryKey t) 
+                                   fieldnames = L.keys $ table t
+                                   scheme = fmap show $ fieldnames 
+                                   in do (_, rows) <- get_rows (table t) (verify_row (fmap (\f -> (f, func)) fieldnames)) 
+                                         row_strs <- sequence $ fmap (printRow fieldnames) rows 
+                                         return $ "Primary key:" ++ pk ++ "\n" ++ unwords(scheme) ++ "\n" ++ unlines(row_strs)
+                                      where func element = True
 
 {-Private-}
 printRow :: [Fieldname] -> Row -> STM(String)
@@ -334,8 +340,8 @@ update_row tr_id tablename t change (rh, r) = let fieldnames = get_all_fields t
                                         return $ Update tr_id (tablename, rh) $ catMaybes update_list 
 
 {-Public-}
---
---
+-- Note that if in the (Row -> Row) function, after passing in the existing row we get a row for whose function we get Nothing
+-- after passing in a fieldname, we do not change that field (as opposed to deleting it)
 update :: TVar Database -> TransactionID -> Tablename -> (Row -> STM Bool) -> (Row -> Row) -> STM (Either ErrString [LogOperation])
 update db tr_id tablename conds changes = do
   tvar_table <- get_table db tablename

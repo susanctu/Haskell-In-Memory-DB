@@ -15,8 +15,7 @@ library
   exposed-modules:
     Operation,
     DBTypes,
-    Client,
-    Server
+    DBUtils
   build-depends:
     base < 5
     ,stm > 2.4
@@ -34,6 +33,8 @@ executable hidb
   build-depends:
     base < 5
     , hidb
+    , containers
+    , stm > 2.4
   ghc-options: -Wall
 
 test-suite test-operation
