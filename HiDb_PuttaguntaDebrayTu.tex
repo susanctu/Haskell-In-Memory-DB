@@ -1,0 +1,111 @@
+\title{HiDb: A Haskell In-Memory Relational Database}
+\author{
+        \textsc{Rohan Puttagunta}
+            \qquad
+        \textsc{Arun Debray}
+            \qquad
+        \textsc{Susan Tu}
+        \mbox{}\\ %
+        \\
+        CS240H\\
+        \mbox{}\\ %
+        \normalsize
+            \texttt{rohanp}
+        \textbar{}
+            \texttt{adebray}
+        \textbar{}
+            \texttt{sctu}
+        \normalsize
+            \texttt{@stanford.edu}
+}
+\date{\today}
+\documentclass[10.75pt]{article}
+%\documentclass{acmconf}
+%\usepackage[pdftex]{graphicx}
+\usepackage{listings}
+%\usepackage[paper=a4paper,dvips,top=2cm,left=1.5cm,right=1.5cm,
+%    foot=3cm,bottom=3cm]{geometry}
+\usepackage[margin=2cm]{geometry}
+\usepackage{float}
+\usepackage{multicol}
+\usepackage[pdftex]{graphicx}
+\usepackage[english]{babel}
+\usepackage{sidecap}
+\usepackage[font=small,labelfont=bf]{caption}
+\usepackage[raggedright]{titlesec}
+
+%----------------------------------------------------------
+
+\makeatletter
+\newenvironment{tablehere}
+  {\def\@captype{table}}
+  {}
+
+\newenvironment{figurehere}
+  {\def\@captype{figure}}
+  {}
+\makeatother
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+We describe our experience implementing an in-memory relational database in Haskell that supports the standard CRUD (create, read, update, delete) operations while providing the requisite ACID (atomicity, consistency, isolation, durability) guarantees. We rely on Haskell's STM module to provide atomicity and isolation. We use a combination of STM, Haskell's type system, dynamic type-checking in order to enforce consistency. We implement undo-redo logging and eventual disk writes to provide durability. We also provide a Haskell library which clients can use to connect to and send transactions to the database. We found that while the STM module greatly eased the implementation of transactions, the lack of support for de-serializing data into a dynamic type was not ideal. 
+ 
+\end{abstract}
+
+\vspace{5mm}
+\begin{multicols}{2}
+
+\section{Introduction} 
+
+\section{Database Operations}
+\subsection{Supported Syntax}
+The database operations that we support are \texttt{CREATE TABLE}, \texttt{DROP TABLE}, \texttt{ALTER TABLE}, \texttt{SELECT}, \texttt{INSERT}, \texttt{SHOW TABLES}, \texttt{UPDATE}, and \texttt{DELETE}.  We support the following syntax for specifying these operations:
+TODO ARUN \\\\
+\subsection{Implementation}
+Each operation is implemented as a Haskell function.  Operations which make changes to the database, should they succeed, should return lists of \texttt{LogOperation}s, where the \texttt{LogOperation} datatype represents log entries and we use different constructors for different types of entries (see table x). Since we cannot perform IO from within STM, the calling function is responsible for actually writing these \texttt{LogOperation}s, which are instances of \texttt{Read} and \texttt{Show} to allow for easy serializability and de-serializability, to the in-memory log. If the operation was malformed (for example, the referenced table does not exist, or the user failed to specify the value for a column for which there is no default value), then we return some error message to the user. For operations such as \texttt{SELECT} that do not modify the database, we return a string that can be written back to the user. \\\\
+In our Haskell implementation of \texttt{SELECT}, we choose to return a \texttt{Table} rather than a \texttt{String} because while we did not implement this functionality in this verison of HiDb, in theory we perform futher operations involving the returned table. We also chose to make use of a \texttt{Row} datatype, which is a wrapper around a \texttt{Fieldname -> Maybe Element} function. This allows us to use functions of the type \texttt{Row -> STM(Bool)} as the condition for whether a row of a table should be deleted or updated. It also allows us to express an update as \texttt{Row -> Row}. 
+
+\section{Data Structures}
+
+\subsection{Concurrency} 
+\noindent\begin{minipage}{.45\textwidth}
+\begin{lstlisting}[caption=code 1,frame=tlrb, breaklines=true]
+data Table 
+  = Table { rowCounter :: Int 
+               , primaryKey :: Maybe Fieldname 
+               , table :: Map Fieldname Column}
+
+data Column 
+  = Column { default_val :: Maybe Element
+                   , col_type :: TypeRep
+                   , column :: TVar(Map RowHash (TVar Element))
+                   } -- first element is default value
+
+data Element = forall a. (Show a, Ord a, Eq a, Read a, Typeable a) => 
+  Element (Maybe a) -- Nothing here means that it's null
+\end{lstlisting}
+\end{minipage}\hfill
+
+Note that we needed to use the \texttt{Existential Quantification} language extension in our definition of \texttt{Element}, which allows us to put any type that is an instance of \texttt{Show}, \texttt{Ord}, \texttt{Eq}, \texttt{Read}, and \texttt{Typeable}.  Note that this means that we do not statically enforce the fact that every column should contain elements of just one type. It seems that it is not possible to statically enforce this in Haskell, since when the user attempts an insert, there is no way to know statically (since the user only provides the input at runtime) whether this input will be of the same type as the other elements in the column. We therefore must enforce the type of columns at run-time (specifically, in the parsing stage, which will be discussed later in the paper) by keeping track of one \texttt{TypeRep} per column. 
+
+We use multiple layers of \texttt{Tvar}s in order to allow operations that touch different parts of the database to proceed at the same time. For example, having each \texttt{Table} be stored in a \texttt{Tvar} means that if client $A$ updates a row in one table, client $B$ can concurrently update a row in another table. Moreover, consider what happens if we attempt changes that affect the database at different levels of granularity: Suppose we concurrently attempt two operations, $O_1$ and $O_2$, where $O_1$ is the insertion of a new column into a table and $O_2$ is the updating of a value in an existing column in the same table. If $O_1$ completes first, then $O_2$ will have to be retried because the pointer (which had to be read for $O_2$ to occur) in the \texttt{Tvar} surrounding the \texttt{Table} type will have changed. However, if $O_2$ completes first, then $O_1$ will complete without issue because the only $Tvar$s that $O_2$ changed are ones that did not need to be read for $O_1$. 
+
+
+\section{Parsing}
+
+\section{Durability}
+
+\section{Summary}
+
+
+\end{multicols}
+
+\begin{thebibliography}{11}
+
+\bibitem{harris} http://research.microsoft.com/pubs/67418/2005-ppopp-composable.pdf
+
+\end{thebibliography}
+\end{document}
