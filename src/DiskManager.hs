@@ -4,21 +4,31 @@ import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Concurrent.STM.TChan
 import Control.Monad
+import qualified Data.Foldable as F
+import qualified Data.Traversable as T
 import qualified Data.Map.Lazy as Map
 import qualified Data.Set as Set
+import Data.Maybe
 import qualified Operation as O
 import System.Directory
 import System.FilePath
-import Server (runServer)
+--import Server (runServer)
 
 special_folder :: FilePath
-special_folder = ".hmdb"
+special_folder = ".hidb"
 
 log_file :: FilePath
 log_file = special_folder </> ".log"
 
+table_file :: Tablename -> FilePath
+table_file (Tablename str) = special_folder </> str ++ ".table"
+
 write_db :: Database -> IO ()
-write_db db = return ()
+write_db (Database db) = F.sequenceA_ $ Map.mapWithKey write_table db
+    where write_table tn tt = do t <- atomically $ readTVar tt
+                                 out <- output_table t
+                                 writeFile (table_file tn) out
+
 
 flush_log :: Log -> IO ()
 flush_log l = do l_copy <- atomically $ dupTChan l
@@ -89,7 +99,11 @@ recover db ops = do committed <- undo db ops
                     redo db ops committed
 
 read_db :: IO (TVar Database)
-read_db = newTVarIO $ Database Map.empty
+read_db = do files <- getDirectoryContents special_folder
+             db <- flip T.forM id $ Map.fromList $ mapMaybe read_file files
+             newTVarIO $ Database db
+    where read_file f | takeExtension f == ".log" = Nothing
+                      | otherwise                 = Just (Tablename $ takeBaseName f, readFile f >>= read_table)
 
 read_log :: IO [LogOperation]
 read_log = liftM read $ readFile log_file

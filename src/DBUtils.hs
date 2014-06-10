@@ -1,5 +1,5 @@
 module DBUtils (construct_row, verify_row, transform_row,
-                 read_table,
+                output_table, read_table,
                 isCharType, isBitType, readType)
 where
 
@@ -11,6 +11,7 @@ import Data.Typeable
 import Data.Int
 import qualified Data.ByteString as B
 import qualified Data.Map.Lazy as Map
+import qualified Data.Traversable as T
 
 data ShowableTable = ShowableTable { rowCounter :: Int
                                    , primaryKey :: Maybe Fieldname
@@ -20,37 +21,30 @@ data ShowableColumn = ShowableColumn { default_val :: Maybe Element
                                      , col_type :: String
                                      , column :: Map.Map RowHash Element} deriving (Show,Read)
 
-{-output_table :: Table -> IO String
+output_table :: Table -> IO String
 output_table table = atomically $ do showable <- from_table table
-                                     return $ show showable-}
+                                     return $ show showable
 
---colToTable :: TVar(Map RowHash (TVar Element) -> STM (Map.Map RowHash Element)
-
-{- from_table :: Table -> STM ShowableTable
-from_table tab = do
-    let stage1 = map (\(f, c) -> (f, from_column c)) $ Map.toList $ DBTypes.table tab
-        stage2 = map (\(f, stc) -> do
-            col <- stc -- should propagate the STM type
-            return (f, col)) stage1
-    colMap <- Map.fromList $ sequence stage2
-    return $ ShowableTable (DBTypes.rowCounter tab) (DBTypes.primaryKey tab) colMap
+from_table :: Table -> STM ShowableTable
+from_table (Table rc pk t) =  do t' <- T.mapM from_column t
+                                 return $ ShowableTable rc pk t'
 
 from_column :: Column -> STM ShowableColumn
-from_column = undefined -}
-{-from_column col = do
-    colData' <- readTVar $ column col
-    colData <- 
-    return $ ShowableColumn (default_val col) (col_type col) colData
--}
+from_column (Column dv ct col) = do extractedCol <- readTVar col
+                                    col' <-  T.mapM readTVar extractedCol
+                                    return $ ShowableColumn dv (show ct) col'
+
 read_table :: String -> IO (TVar Table)
 read_table str = atomically $ to_table $ read str
 
 to_table :: ShowableTable -> STM (TVar Table)
-to_table show_table = newTVar $ Table 0 Nothing Map.empty
+to_table (ShowableTable rc pk t) = do  t' <- T.mapM to_column t
+                                       newTVar $ Table rc pk t'
 
-to_column :: ShowableColumn -> STM (TVar Column)
-to_column show_col = do col <- newTVar Map.empty
-                        newTVar $ Column Nothing (typeOf "JI") col
+to_column :: ShowableColumn -> STM Column
+to_column (ShowableColumn dv ct col) = do col1 <- T.mapM newTVar col
+                                          col2 <- newTVar col1
+                                          return $ Column dv (readType ct) col2
 
 construct_row :: [(Fieldname, Element)] -> Row
 construct_row content = Row $ return . (flip lookup content)
@@ -80,6 +74,6 @@ readType :: String -> TypeRep
 readType ftype
     | ftype == "boolean" = typeOf(undefined :: Bool)
     | isCharType ftype || isBitType ftype = typeOf(undefined :: B.ByteString)
-    | ftype == "integer" = typeOf(undefined :: Int32)
+    | ftype == "integer" = typeOf(undefined :: Int)
     | ftype == "real"    = typeOf(undefined :: Double)
     | otherwise = typeOf(undefined :: B.ByteString)
