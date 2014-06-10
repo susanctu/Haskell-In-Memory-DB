@@ -25,7 +25,6 @@ import Control.Concurrent.STM.TChan
 import Test.QuickCheck
 import Control.Monad
 import Data.ByteString (ByteString)
-import Data.Int (Int32)
 import Data.List (isPrefixOf, stripPrefix)
 import Data.Maybe
 import Data.Map.Lazy (Map)
@@ -61,7 +60,7 @@ instance Show Element where
                    | typeOf x == typeOf (undefined::Maybe ByteString) = "ByteString" ++ show x
 
 instance Read Element where
-  readsPrec n str | isPrefixOf "Int32" str      = map (\(a,b) -> (Element a, b)) $ (readsPrec n :: ReadS (Maybe Int32)) $ fromJust $ stripPrefix "Int32" str
+  readsPrec n str | isPrefixOf "Int" str      = map (\(a,b) -> (Element a, b)) $ (readsPrec n :: ReadS (Maybe Int)) $ fromJust $ stripPrefix "Int" str
                   | isPrefixOf "Double" str     = map (\(a,b) -> (Element a, b)) $ (readsPrec n :: ReadS (Maybe Double)) $ fromJust $ stripPrefix "Double" str
                   | isPrefixOf "ByteString" str = map (\(a,b) -> (Element a, b)) $ (readsPrec n :: ReadS (Maybe ByteString)) $ fromJust $ stripPrefix "ByteString" str
 

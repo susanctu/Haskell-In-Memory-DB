@@ -12,7 +12,6 @@ import Control.Monad
 import qualified Data.ByteString as B
 import Data.List (findIndex)
 import Data.List.Split (splitOneOf)
-import Data.Int
 import qualified Data.Set as S
 import qualified Data.Map as M
 import Data.Typeable
