@@ -3,7 +3,7 @@
 module Client (
 	setup,
 	addOperation,
-	startTransaction
+	runTransaction
 ) where
 
 import Network
@@ -24,8 +24,8 @@ addOperation :: [String] -> String -> [String]
 addOperation ops newOp = ops ++ [newOp]
 
 -- actually execute stuff, and return the result to us.
-startTransaction :: Handle -> [String] -> IO ()
-startTransaction h cmds = do
+runTransaction :: Handle -> [String] -> IO ()
+runTransaction h cmds = do
 	mapM_ (hPutStrLn h) cmds
 	hPutStrLn h "STOP" -- signals end of commands
 	hGetLine h >>= hPutStrLn stdout
