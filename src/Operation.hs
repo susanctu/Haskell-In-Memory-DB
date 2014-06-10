@@ -7,6 +7,7 @@ module Operation (create_table
   , insert
   , show_tables
   , show_table_contents
+  , show_table_contents_helper
   , update
   , delete) where
 

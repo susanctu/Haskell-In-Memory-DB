@@ -19,6 +19,7 @@ main = do output <- sequence $ [test_create_table
                                 ,test_alter_add
                                 ,test_alter_drop
                                 ,test_insert
+                                ,test_select
                                 ]
           mapM putStrLn output
           return ()
@@ -72,10 +73,19 @@ test_insert = atomically $ do let tablename  = D.Tablename "sample_table"
                               	Left (D.ErrString str) -> return $ "error: " ++ str
                                 _ -> O.show_table_contents db tablename
 
-{-test_select :: IO String 
+test_select :: IO String 
 test_select = atomically $ do let tablename  = D.Tablename "sample_table"
                               let field_and_default =  [(D.Fieldname "field1", 1), (D.Fieldname "field2", 2)]
                               db <- create_empty_db
                               _ <- O.create_table db (D.TransactionID "blah" 0) tablename (fmap (\(f, d)-> (f, Just(D.Element(Just d)), typeOf(d::Int))) field_and_default) Nothing
-                              O.insert db (D.TransactionID "blah" 0) tablename (DU.construct_row [(D.Fieldname "field1", D.Element (Just 5::Maybe Int)), (D.Fieldname "field2", D.Element (Just 6::Maybe Int))])
-                              _ -> O.select db tablename [D.Fieldname "field1", D.Fieldname "field2"] -> (Row -> STM(Bool))-}                    
+                              _ <- O.insert db (D.TransactionID "blah" 0) tablename (DU.construct_row [(D.Fieldname "field1", D.Element (Just 5::Maybe Int)), (D.Fieldname "field2", D.Element (Just 6::Maybe Int))])
+                              _ <- O.insert db (D.TransactionID "blah" 0) tablename (DU.construct_row [(D.Fieldname "field1", D.Element (Just 7::Maybe Int)), (D.Fieldname "field2", D.Element (Just 8::Maybe Int))])
+                              _ <- O.insert db (D.TransactionID "blah" 0) tablename (DU.construct_row [(D.Fieldname "field1", D.Element (Just 10::Maybe Int)), (D.Fieldname "field2", D.Element (Just 10::Maybe Int))])
+                              let func = DU.verify_row [(D.Fieldname "field1", cond)] 
+                              res <- O.select db tablename [D.Fieldname "field1"] func      
+                              case res of 
+                              	Left (D.ErrString str)-> return str
+                              	Right t -> O.show_table_contents_helper t    
+                           where cond (D.Element elem) = case elem of 
+	 										              Just x -> if show(x) == "5" then False else True
+	 										              Nothing -> False            
