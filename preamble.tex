@@ -1,0 +1,107 @@
+% Preamble to the document, to avoid cluttering it up
+
+\title{HiDb: A Haskell In-Memory Relational Database}
+\author{
+	\textsc{Rohan Puttagunta}
+		\qquad
+	\textsc{Arun Debray}
+		\qquad
+	\textsc{Susan Tu}
+		\mbox{}\\ %
+		\\
+		CS240H\\
+		\mbox{}\\ %
+		\normalsize
+			\texttt{rohanp}
+		\textbar{}
+			\texttt{adebray}
+		\textbar{}
+			\texttt{sctu}
+		\normalsize
+			\texttt{@stanford.edu}
+}
+\date{\today}
+
+%\documentclass{acmconf}
+%\usepackage[pdftex]{graphicx}
+
+\usepackage{listings}
+\usepackage{xcolor}
+%\usepackage[paper=a4paper,dvips,top=2cm,left=1.5cm,right=1.5cm,
+%	foot=3cm,bottom=3cm]{geometry}
+
+
+% listings magic!
+\definecolor{DefaultColor}{HTML}{00428C}
+\definecolor{CommentColor}{HTML}{60A0B0}
+\definecolor{BackgroundColor}{HTML}{E4E5E7}
+\definecolor{FrameColor}{HTML}{95ABD0}
+\definecolor{NumberColor}{HTML}{40A070}
+\definecolor{IDColor}{HTML}{06278E}
+\definecolor{KeywordColor}{HTML}{007020}
+\definecolor{TypeColor}{HTML}{902000}
+
+
+% Courtesy of% http://tex.stackexchange.com/questions/34896/coloring-digits-with-the-listings-package
+\newcommand\digitstyle{\color{NumberColor}}\makeatletter\newcommand{\ProcessDigit}[1]{%
+  \ifnum\lst@mode=\lst@Pmode\relax%
+   {\digitstyle #1}%
+  \else
+	#1%
+  \fi
+}
+\makeatother
+\lstset{literate=
+	{0}{{{\ProcessDigit{0}}}}1
+	{1}{{{\ProcessDigit{1}}}}1
+	{2}{{{\ProcessDigit{2}}}}1
+	{3}{{{\ProcessDigit{3}}}}1
+	{4}{{{\ProcessDigit{4}}}}1
+	{5}{{{\ProcessDigit{5}}}}1
+	{6}{{{\ProcessDigit{6}}}}1
+	{7}{{{\ProcessDigit{7}}}}1
+	{8}{{{\ProcessDigit{8}}}}1
+	{9}{{{\ProcessDigit{9}}}}1
+}
+
+\lstset{
+	backgroundcolor=\color{BackgroundColor},
+	basicstyle=\color{DefaultColor}\footnotesize\tt,
+	breakatwhitespace=false,
+	breaklines=true,
+	commentstyle=\color{CommentColor}\textsl,
+	frame=true,
+	frameshape={yyy}{ynny}{y}{yyy},
+	identifierstyle=\color{IDColor},
+	keywordstyle=\color{KeywordColor},
+	language=Haskell,
+	emph={Bool, Char, String, IO, Maybe, Either, Ordering, Int, Integer, Ratio, Float, Double, Complex, TVar, MVar, STM},
+	emphstyle=\color{TypeColor},
+	rulecolor=\color{FrameColor},
+	rulesepcolor=\color{FrameColor},
+	showstringspaces=false,
+	stringstyle=\color{FrameColor}, % apparently
+	tabsize=4
+}
+
+% end of listings magic
+
+\usepackage[margin=2cm]{geometry}
+\usepackage{float}
+\usepackage{multicol}
+\usepackage[pdftex]{graphicx}
+\usepackage[english]{babel}
+\usepackage{sidecap}
+\usepackage[font=small,labelfont=bf]{caption}
+\usepackage[raggedright]{titlesec}
+\usepackage{hyperref}
+
+\makeatletter
+\newenvironment{tablehere}
+  {\def\@captype{table}}
+  {}
+
+\newenvironment{figurehere}
+  {\def\@captype{figure}}
+  {}
+\makeatother
