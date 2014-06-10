@@ -25,7 +25,6 @@ import Control.Concurrent.STM.TChan
 import Test.QuickCheck
 import Control.Monad
 import Data.ByteString (ByteString)
-import Data.Int (Int32)
 import Data.List (isPrefixOf, stripPrefix)
 import Data.Maybe
 import Data.Map.Lazy (Map)
@@ -56,12 +55,12 @@ data Column = Column { default_val :: Maybe Element
 data Element = forall a. (Show a, Ord a, Eq a, Read a, Typeable a) => Element (Maybe a) -- Nothing here means that it's null
 
 instance Show Element where
-  show (Element x) | typeOf x == typeOf (undefined::Maybe Int32)      = "Int32" ++ show x
+  show (Element x) | typeOf x == typeOf (undefined::Maybe Int)      = "Int" ++ show x
                    | typeOf x == typeOf (undefined::Maybe Double)     = "Double" ++ show x
                    | typeOf x == typeOf (undefined::Maybe ByteString) = "ByteString" ++ show x
 
 instance Read Element where
-  readsPrec n str | isPrefixOf "Int32" str      = map (\(a,b) -> (Element a, b)) $ (readsPrec n :: ReadS (Maybe Int32)) $ fromJust $ stripPrefix "Int32" str
+  readsPrec n str | isPrefixOf "Int" str      = map (\(a,b) -> (Element a, b)) $ (readsPrec n :: ReadS (Maybe Int)) $ fromJust $ stripPrefix "Int" str
                   | isPrefixOf "Double" str     = map (\(a,b) -> (Element a, b)) $ (readsPrec n :: ReadS (Maybe Double)) $ fromJust $ stripPrefix "Double" str
                   | isPrefixOf "ByteString" str = map (\(a,b) -> (Element a, b)) $ (readsPrec n :: ReadS (Maybe ByteString)) $ fromJust $ stripPrefix "ByteString" str
 

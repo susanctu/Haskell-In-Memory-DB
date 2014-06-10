@@ -8,7 +8,6 @@ import Control.Monad
 
 import DBTypes
 import Data.Typeable
-import Data.Int
 import qualified Data.ByteString as B
 import qualified Data.Map.Lazy as Map
 import qualified Data.Traversable as T
