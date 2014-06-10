@@ -56,7 +56,7 @@ data Column = Column { default_val :: Maybe Element
 data Element = forall a. (Show a, Ord a, Eq a, Read a, Typeable a) => Element (Maybe a) -- Nothing here means that it's null
 
 instance Show Element where
-  show (Element x) | typeOf x == typeOf (undefined::Maybe Int32)      = "Int32" ++ show x
+  show (Element x) | typeOf x == typeOf (undefined::Maybe Int)      = "Int" ++ show x
                    | typeOf x == typeOf (undefined::Maybe Double)     = "Double" ++ show x
                    | typeOf x == typeOf (undefined::Maybe ByteString) = "ByteString" ++ show x
 

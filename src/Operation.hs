@@ -210,14 +210,14 @@ insert_vals tr_id rowhash tablename t (f:fieldnames) row logOps = do
     Just new_elem -> do res <- insert_val_helper tr_id rowhash tablename t f new_elem
                         case res of 
                           Left str -> return $ Left str
-                          Right (new_table, new_logOp) -> insert_vals tr_id rowhash tablename t fieldnames row (new_logOp:logOps)
+                          Right (new_table, new_logOp) -> insert_vals tr_id rowhash tablename new_table fieldnames row (new_logOp:logOps)
     Nothing -> case L.lookup f (table t) of
                  Nothing -> return $ Left $ ErrString ("DB error")
                  Just col -> case default_val col of 
                                Just val -> do res <- insert_val_helper tr_id rowhash tablename t f val
                                               case res of 
                                                 Left str -> return $ Left str
-                                                Right (new_table, new_logOp) -> insert_vals tr_id rowhash tablename t fieldnames row (new_logOp:logOps)   
+                                                Right (new_table, new_logOp) -> insert_vals tr_id rowhash tablename new_table fieldnames row (new_logOp:logOps)   
                                Nothing -> return $ Left $ ErrString "DB error"
 insert_vals _ _ _ t _ _ logOps = return $ Right (t, logOps)
 
@@ -235,7 +235,7 @@ insert_val_helper tr_id rowhash tablename t f new_elem = let new_logOp = (f, new
 
 {-Private: Get a list of fieldnames for which default_val was Nothing-}
 get_fields_without_defaults :: Table -> [Fieldname]
-get_fields_without_defaults t = let maybe_fieldnames = L.mapWithKey (\k v -> if (isNothing(default_val v)) then Nothing else Just k) (table t) in
+get_fields_without_defaults t = let maybe_fieldnames = L.mapWithKey (\k v -> if (isNothing(default_val v)) then Just k else Nothing) (table t) in
   catMaybes (L.elems maybe_fieldnames)
 
 {-Private-}
