@@ -23,9 +23,20 @@ setup hostname port = do
 addOperation :: [String] -> String -> [String]
 addOperation ops newOp = ops ++ [newOp]
 
+handleShowing :: Handle -> IO ()
+handleShowing h = do
+	next <- hGetLine h
+	case next of
+		"DONE" -> return ()
+		_	   -> do hPutStrLn stdout next
+					 handleShowing h
+
 -- actually execute stuff, and return the result to us.
 runTransaction :: Handle -> [String] -> IO ()
 runTransaction h cmds = do
 	mapM_ (hPutStrLn h) cmds
 	hPutStrLn h "STOP" -- signals end of commands
-	hGetLine h >>= hPutStrLn stdout
+	next <- hGetLine h
+	case next of
+		"SHOWING" -> handleShowing h
+		_		  -> hPutStrLn stdout next

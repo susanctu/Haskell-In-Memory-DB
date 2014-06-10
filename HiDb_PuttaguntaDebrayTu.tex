@@ -1,50 +1,6 @@
-\title{HiDb: A Haskell In-Memory Relational Database}
-\author{
-        \textsc{Rohan Puttagunta}
-            \qquad
-        \textsc{Arun Debray}
-            \qquad
-        \textsc{Susan Tu}
-        \mbox{}\\ %
-        \\
-        CS240H\\
-        \mbox{}\\ %
-        \normalsize
-            \texttt{rohanp}
-        \textbar{}
-            \texttt{adebray}
-        \textbar{}
-            \texttt{sctu}
-        \normalsize
-            \texttt{@stanford.edu}
-}
-\date{\today}
-\documentclass[10.75pt]{article}
-%\documentclass{acmconf}
-%\usepackage[pdftex]{graphicx}
-\usepackage{listings}
-%\usepackage[paper=a4paper,dvips,top=2cm,left=1.5cm,right=1.5cm,
-%    foot=3cm,bottom=3cm]{geometry}
-\usepackage[margin=2cm]{geometry}
-\usepackage{float}
-\usepackage{multicol}
-\usepackage[pdftex]{graphicx}
-\usepackage[english]{babel}
-\usepackage{sidecap}
-\usepackage[font=small,labelfont=bf]{caption}
-\usepackage[raggedright]{titlesec}
+\documentclass[10pt]{article}
 
-%----------------------------------------------------------
-
-\makeatletter
-\newenvironment{tablehere}
-  {\def\@captype{table}}
-  {}
-
-\newenvironment{figurehere}
-  {\def\@captype{figure}}
-  {}
-\makeatother
+\input{preamble}
 
 \begin{document}
 
@@ -62,6 +18,7 @@ We describe our experience implementing an in-memory relational database in Hask
 
 \section{Database Operations}
 \subsection{Supported Syntax}
+\label{simplifying_parsing_assumptions}
 The database operations that we support are \texttt{CREATE TABLE}, \texttt{DROP TABLE}, \texttt{ALTER TABLE}, \texttt{SELECT}, \texttt{INSERT}, \texttt{SHOW TABLES}, \texttt{UPDATE}, and \texttt{DELETE}.  We support the following syntax for specifying these operations:
 TODO ARUN \\\\
 \subsection{Implementation}
@@ -72,17 +29,18 @@ In our Haskell implementation of \texttt{SELECT}, we choose to return a \texttt{
 
 \subsection{Concurrency} 
 \noindent\begin{minipage}{.45\textwidth}
-\begin{lstlisting}[caption=code 1,frame=tlrb, breaklines=true]
+\begin{lstlisting}[caption=The data structures used to build up a table.,frame=tlrb, breaklines=true]
 data Table 
   = Table { rowCounter :: Int 
-               , primaryKey :: Maybe Fieldname 
-               , table :: Map Fieldname Column}
+          , primaryKey :: Maybe Fieldname 
+          , table :: Map Fieldname Column
+		  }
 
 data Column 
   = Column { default_val :: Maybe Element
-                   , col_type :: TypeRep
-                   , column :: TVar(Map RowHash (TVar Element))
-                   } -- first element is default value
+           , col_type :: TypeRep
+           , column :: TVar(Map RowHash (TVar Element))
+           } -- first element is default value
 
 data Element = forall a. (Show a, Ord a, Eq a, Read a, Typeable a) => 
   Element (Maybe a) -- Nothing here means that it's null
@@ -95,7 +53,7 @@ We use multiple layers of \texttt{Tvar}s in order to allow operations that touch
 
 
 \section{Parsing}
-
+\input{parsing}
 \section{Durability}
 
 \section{Summary}
@@ -105,7 +63,7 @@ We use multiple layers of \texttt{Tvar}s in order to allow operations that touch
 
 \begin{thebibliography}{11}
 
-\bibitem{harris} http://research.microsoft.com/pubs/67418/2005-ppopp-composable.pdf
+\bibitem{harris} \url{http://research.microsoft.com/pubs/67418/2005-ppopp-composable.pdf}
 
 \end{thebibliography}
 \end{document}
