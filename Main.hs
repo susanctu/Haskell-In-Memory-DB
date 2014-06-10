@@ -132,23 +132,26 @@ test_update = atomically $ do let tablename  = D.Tablename "sample_table"
 test_write_and_hydrate :: IO String 
 test_write_and_hydrate = do let tablename1  = D.Tablename "sample_table1"
                             let tablename2 = D.Tablename "sample_table2"
-                            sssssssssstr <- atomically $ do let field_and_default1 =  [(D.Fieldname "table1_field1", 1), (D.Fieldname "table1_field2", 2)]
+                            (hdb, l, at) <- atomically $ do let field_and_default1 =  [(D.Fieldname "table1_field1", 1), (D.Fieldname "table1_field2", 2)]
                                                             let field_and_default2 = [(D.Fieldname "table2_field1", 1)]
                                                             db <- create_empty_db
                                                             l <- newTChan::STM(TChan D.LogOperation)
                                                             at <- newTVar (S.empty)
                                                             should_be_logOps <- O.create_table db (D.TransactionID "blah" 0) tablename1 (fmap (\(f, d)-> (f, Just(D.Element(Just d)), typeOf(d::Int))) field_and_default1) Nothing
                                                             case should_be_logOps of 
-                                                              Left errstring -> return "" -- should not happen
+                                                              Left errstring -> do edb <- readTVar db
+                                                                                   return (edb, l, at) -- should not happen
                                                               Right logOps -> do _ <- mapM (writeTChan l) logOps 
-                                                                                 should_be_logOps2 <- populateTable db tablename1 1 0
+                                                                                 should_be_logOps2 <- populateTable db tablename1 0 5
                                                                                  case should_be_logOps2 of 
-                                                                                   Left errstring -> return "" -- should not happen
+                                                                                   Left errstring -> do edb <- readTVar db
+                                                                                                        return (edb, l, at) -- should not happen
                                                                                    Right logOps -> do _ <- mapM (writeTChan l) logOps 
-                                                                                                      return "success"
-                            return sssssssssstr
+                                                                                                      edb <- readTVar db 
+                                                                                                      return (edb, l, at) 
                             --DM.run_checkpoint hdb l at 
-                            --return ""
+                            write_db hdb 
+                            return ""
                             --tvar_db <- hydrate
                             --atomically $ do t1_after <- O.show_table_contents tvar_db tablename1 
                               --              --t2_after <- O.show_table_contents tvar_db tablename2
@@ -157,7 +160,7 @@ test_write_and_hydrate = do let tablename1  = D.Tablename "sample_table1"
 -- this will populate the table with increasing integers 1, 2, 3, etc.
 populateTable :: TVar D.Database -> D.Tablename -> Int -> Int -> STM(Either D.ErrString [D.LogOperation]) 
 populateTable db tablename tr_id 0 = return $ Right []                   
-populateTable db tablename tr_id numRows = do res <- O.insert db (D.TransactionID "blah" tr_id) tablename (DU.construct_row [(D.Fieldname "field1", D.Element (Just numRows)), (D.Fieldname "field2", D.Element (Just 1::Maybe Int))])
+populateTable db tablename tr_id numRows = do res <- O.insert db (D.TransactionID "blah" tr_id) tablename (DU.construct_row [(D.Fieldname "table1_field1", D.Element (Just numRows)), (D.Fieldname "table1_field2", D.Element (Just 1::Maybe Int))])
                                               case res of 
                                                 Left errstr -> return $ Left $ errstr
                                                 Right logOp -> do res_rest <- populateTable db tablename tr_id (numRows - 1)

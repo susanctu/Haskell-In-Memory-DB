@@ -224,13 +224,13 @@ insert_vals _ _ _ t _ _ logOps = return $ Right (t, logOps)
 
 {-Private-}
 insert_val_helper :: TransactionID -> RowHash -> Tablename -> Table -> Fieldname -> Element -> STM (Either ErrString (Table, (Fieldname,Element))) 
-insert_val_helper tr_id rowhash tablename t f new_elem = let new_logOp = (f, new_elem) 
+insert_val_helper tr_id (RowHash rh) tablename t f new_elem = let new_logOp = (f, new_elem) 
   in case L.lookup f (table t) of
        Just c -> do col_map <- readTVar $ column c
                     new_tvar_elem <- newTVar new_elem
-                    new_col_map <- newTVar $ L.insert rowhash new_tvar_elem (col_map)
+                    new_col_map <- newTVar $ L.insert (RowHash rh) new_tvar_elem (col_map)
                     let new_col = Column (default_val c) (col_type c) new_col_map
-                    let new_table = Table ((rowCounter t) +1) (primaryKey t) (L.insert f new_col (table t))
+                    let new_table = Table (rh) (primaryKey t) (L.insert f new_col (table t))
                     return $ Right (new_table, new_logOp)
        Nothing -> return $ Left (ErrString "DB error")
 
@@ -261,7 +261,7 @@ insert db tr_id tablename row = do
     Just x -> do t <- readTVar x -- t is of type Table
                  has_required_vals <- M.foldrM (check_defaults row) True $ get_fields_without_defaults t
                  if has_required_vals
-                    then do res <- insert_vals tr_id (RowHash((rowCounter t) + 1)) tablename t (get_all_fields t) row []
+                    then do res <- insert_vals tr_id (RowHash((rowCounter t)+1)) tablename t (get_all_fields t) row []
                             case res of 
                               Left err_str -> return $ Left err_str 
                               Right (new_t, logOps) -> do writeTVar x new_t
