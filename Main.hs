@@ -17,6 +17,8 @@ main :: IO ()
 main = do output <- sequence $ [test_create_table
                                 ,test_drop_table
                                 ,test_alter_add
+                                ,test_alter_drop
+                                ,test_insert
                                 ]
           mapM putStrLn output
           return ()
@@ -52,3 +54,28 @@ test_alter_add = atomically $ do let tablename  = D.Tablename "sample_table"
                                  _ <- O.alter_table_add db (D.TransactionID "blah" 0) tablename (D.Fieldname "field3") (typeOf(undefined::String)) Nothing True
                                  O.show_table_contents db tablename
 
+test_alter_drop :: IO String
+test_alter_drop = atomically $ do let tablename  = D.Tablename "sample_table"
+                                  let field_and_default =  [(D.Fieldname "field1", 1), (D.Fieldname "field2", 2)]
+                                  db <- create_empty_db
+                                  _ <- O.create_table db (D.TransactionID "blah" 0) tablename (fmap (\(f, d)-> (f, Just(D.Element(Just d)), typeOf(d::Int))) field_and_default) Nothing
+                                  _ <- O.alter_table_drop db (D.TransactionID "blah" 0) tablename (D.Fieldname "field2")
+                                  O.show_table_contents db tablename
+
+test_insert :: IO String 
+test_insert = atomically $ do let tablename  = D.Tablename "sample_table"
+                              let field_and_default =  [(D.Fieldname "field1", 1), (D.Fieldname "field2", 2)]
+                              db <- create_empty_db
+                              _ <- O.create_table db (D.TransactionID "blah" 0) tablename (fmap (\(f, d)-> (f, Just(D.Element(Just d)), typeOf(d::Int))) field_and_default) Nothing
+                              res <- O.insert db (D.TransactionID "blah" 0) tablename (DU.construct_row [(D.Fieldname "field1", D.Element (Just 5::Maybe Int)), (D.Fieldname "field2", D.Element (Just 6::Maybe Int))])
+                              case res of 
+                              	Left (D.ErrString str) -> return $ "error: " ++ str
+                                _ -> O.show_table_contents db tablename
+
+{-test_select :: IO String 
+test_select = atomically $ do let tablename  = D.Tablename "sample_table"
+                              let field_and_default =  [(D.Fieldname "field1", 1), (D.Fieldname "field2", 2)]
+                              db <- create_empty_db
+                              _ <- O.create_table db (D.TransactionID "blah" 0) tablename (fmap (\(f, d)-> (f, Just(D.Element(Just d)), typeOf(d::Int))) field_and_default) Nothing
+                              O.insert db (D.TransactionID "blah" 0) tablename (DU.construct_row [(D.Fieldname "field1", D.Element (Just 5::Maybe Int)), (D.Fieldname "field2", D.Element (Just 6::Maybe Int))])
+                              _ -> O.select db tablename [D.Fieldname "field1", D.Fieldname "field2"] -> (Row -> STM(Bool))-}                    
