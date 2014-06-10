@@ -8,7 +8,6 @@ import Control.Monad
 
 import DBTypes
 import Data.Typeable
-import Data.Int
 import qualified Data.ByteString as B
 import qualified Data.Map.Lazy as Map
 
@@ -80,6 +79,6 @@ readType :: String -> TypeRep
 readType ftype
     | ftype == "boolean" = typeOf(undefined :: Bool)
     | isCharType ftype || isBitType ftype = typeOf(undefined :: B.ByteString)
-    | ftype == "integer" = typeOf(undefined :: Int32)
+    | ftype == "integer" = typeOf(undefined :: Int)
     | ftype == "real"    = typeOf(undefined :: Double)
     | otherwise = typeOf(undefined :: B.ByteString)
