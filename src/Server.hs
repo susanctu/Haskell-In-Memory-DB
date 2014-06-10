@@ -59,14 +59,14 @@ detectPrimaryKey fieldInfo = case (filter (\args -> head (words args) == "PRIMAR
     x:_ -> Just $ Fieldname $ (words x) !! 2 -- since it's of the form PRIMARY KEY fieldname
     []    -> Nothing
 
-{-readType :: String -> TypeRep
+-- why was this commented out...?
+readType :: String -> TypeRep
 readType ftype
     | ftype == "boolean" = typeOf(undefined :: Bool)
     | isCharType ftype || isBitType ftype = typeOf(undefined :: B.ByteString)
-    | ftype == "integer" = typeOf(undefined :: Int32)
+    | ftype == "integer" = typeOf(undefined :: Int)
     | ftype == "real"    = typeOf(undefined :: Double)
     | otherwise = typeOf(undefined :: B.ByteString)
--}
 
 --inelegant, but sort-of polymorphism.
 getBool :: Maybe String -> Maybe Bool
@@ -76,8 +76,8 @@ getBool (Just s) = Just (read s :: Bool)
 getByteString :: Maybe String -> Maybe B.ByteString
 getByteString = liftM (\s -> read s :: B.ByteString)
 
-getInt32 :: Maybe String -> Maybe Int32
-getInt32 = liftM (\s -> read s :: Int32)
+getInt :: Maybe String -> Maybe Int
+getInt = liftM (\s -> read s :: Int)
 
 getDouble :: Maybe String -> Maybe Double
 getDouble = liftM (\s -> read s :: Double)
@@ -100,7 +100,7 @@ createField fieldInfo
      -}
     | isCharType ftype || isBitType ftype = (name, setupDefault (getByteString df), typeOf(undefined :: B.ByteString))
     -- I guess there should be a bitstring type. Derive from ByteString, somehow...?
-    | ftype == "integer"    = (name, setupDefault (getInt32 df), typeOf(undefined :: Int32))
+    | ftype == "integer"    = (name, setupDefault (getInt df), typeOf(undefined :: Int))
     | ftype == "real"       = (name, setupDefault (getDouble df), typeOf(undefined :: Double))
     -- do we care enough to make this the default?
     | otherwise             = (name, setupDefault (getByteString df), typeOf(undefined :: B.ByteString))
@@ -287,7 +287,12 @@ incrementTId tID = TransactionID {
 -- TODO: determine whether a given command will alter the table,
 -- thus forcing it to be given its own atomic command.
 altersTable :: String -> Bool
-altersTable = undefined
+altersTable s =
+	case words s of
+		("CREATE":"TABLE":_) -> True
+		("DROP":"TABLE":_)   -> True
+		("ALTER":"TABLE":_)  -> True
+		_					 -> False
 
 {- Split off recursively: all requests that don't modify the table should be done atomically.
    Those that do modify the table should be done in their own call to atomically.
