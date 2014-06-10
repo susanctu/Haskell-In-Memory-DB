@@ -1,3 +1,26 @@
 % Section on parsing.
 
+Though parsing wasn't the prime directive of this project, it was still a major aspect of it: in order to provide a usable end program, we needed a server that can respond to queries and manage a database.
 
+Upon connecting to a client, this server devotes a thread to listening to instructions from a client, which are received in blocks. Since there may be multiple clients acting at the same time, as well as possible other threats to durability (e.g. power outages), it would be optimal for all of these commands to be run in one atomic block, so that they can be easily undone and redone.
+
+However, a few commands alter the structure of the database itself, i.e. \verb+CREATE TABLE+, \verb+DROP TABLE+, and \verb+ALTER TABLE+. These commands change the types of fields or the tables themselves, and thus should go in their own atomic actions.
+
+Thus, the first step in parsing is to split the client's block of actions into sections that can be executed atomically: as many commands as possible that don't alter the structure of the database, followed by one that does, then as many as possible that don't, and so on. The following code provides a simplified implementation of this.
+\lstinputlisting[caption=Grouping the client's issued commands.]{listing2.hs}
+Once this is done, the server has blocks of commands that can be issued atomically. This allows us to take advantage of the STM framework provided by Haskell, using the \verb+atomically+ function to convert all of the atomic actions on the database into one \verb+IO+ action that will execute atomically.
+
+The return type of these operations is of the form \verb+STM (Either ErrString [LogOperation])+, and these two cases are handled differently:
+\begin{itemize}
+	\item If the database operation returns \verb+Left err+, then the rest of the block should stop executing, and the error is reported to the user.
+	\item If the database operation succeeded, returning \verb+Right logOp+, then the resulting statements should be written to the log, to power the undo/redo logging of the whole database.
+\end{itemize}
+Here's an example of how this was handled in the code.
+\lstinputlisting{listing3.hs}
+That atomicity was the easiest aspect of the parser/server was one of the primary advantages of using Haskell.
+
+Finally, the \verb+parseCommand+ function pattern-matches on the different possible commands and chooses the correct operation to execute. This is where the bulk of the explicit parsing was done; however, in order to simplify this function, we made some simplifying constraints on the subset of SQL accepted by this parser, as detailed in Section~\ref{simplifying_parsing_assumptions} above.
+
+One trick in parsing was that the database is strongly typed, but the client sends over strings; in theory, the server has to read data from strings into an arbitrary type specified at runtime. Haskell's type system does not make this very easy, and we found it much easier to restrict to several basic types and pattern-match against a \verb+TypeRep+ stored along with every database column. Then, there are only a few types to check, and these can be done without too much code.
+
+The types we used are \verb+Int+, \verb+Real+ (backed by a \verb+Double+), \verb+Bool+, and \verb+Char+ and bit arrays; these were chosen to represent the fundamental SQL types. It would not be hard to add more types, since this just involves adding one step to each pattern-matching function for the types.

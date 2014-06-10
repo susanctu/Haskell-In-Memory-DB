@@ -314,7 +314,7 @@ incrementTId tID = TransactionID {
     transactionNum = 1 + transactionNum tID
 }
 
--- TODO: determine whether a given command will alter the table,
+-- determines whether a given command will alter the table,
 -- thus forcing it to be given its own atomic command.
 altersTable :: String -> Bool
 altersTable s =
