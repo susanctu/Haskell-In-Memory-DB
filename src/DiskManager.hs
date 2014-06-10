@@ -1,3 +1,18 @@
+module DiskManager (special_folder
+  , log_file
+  , table_file
+  , write_db
+  , flush_log
+  , consume_log
+  , run_checkpoint
+  , undo
+  , redo
+  , recover
+  , read_db
+  , read_log
+  , hydrate
+  , start_db) where
+
 import DBTypes
 import DBUtils
 import Control.Concurrent
@@ -51,7 +66,7 @@ consume_log l active = do flag <- should_consume l active
                                                   _              -> return True
 
 run_checkpoint :: TVar Database -> Log -> TVar ActiveTransactions -> IO ()
-run_checkpoint db l active = do threadDelay 30000000 --thirty seconds
+run_checkpoint db l active = do threadDelay 3 --thirty seconds
                                 flush_log l
                                 (unwrapped_db, unwrapped_active) <- atomically $ do a <- readTVar db
                                                                                     b <- readTVar active
