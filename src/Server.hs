@@ -194,7 +194,7 @@ select_util db fieldstr tableStr conditions = do
     tbl <- select db tableName fieldNames cond
     case tbl of
         Left err -> return $ Left err
-        Right table -> return $ Right $ show table
+        Right table -> return $ Right $ show_table_contents_helper table
 
 -- This is parsed as INSERT INTO tablename(fieldname) VALUES values
 -- I'm pretty sure this needs to be reworked.
