@@ -3,6 +3,7 @@ module Operation (create_table
   , drop_table
   , alter_table_add
   , alter_table_drop
+  , get_column_type
   , select
   , insert
   , show_tables

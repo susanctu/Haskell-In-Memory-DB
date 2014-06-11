@@ -15,7 +15,7 @@ library
   exposed-modules:
     Operation,
     DBTypes,
-    DBUtils
+    DBUtils,
   build-depends:
     base < 5
     ,stm > 2.4
