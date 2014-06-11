@@ -1,4 +1,3 @@
-{-# LANGUAGE ScopedTypeVariables #-}
 -- This part of the database listens for queries, parses them, and then reports the action or an error
 
 module Server (
@@ -185,7 +184,6 @@ parse_predicate conds = let elems = split $ head conds
                          in if check_parens elems then verify_row $ M.toList $ merge $ transform elems
                                                   else (\_ -> do return False)
 
---insert_util 
 -- Note: for ease of parsing, the fieldnames should be separated only by commas, not spaces
 -- this is not hard to fix, but definitely beside the point of the database.
 select_util :: TVar Database -> String -> String -> [String] -> STM (Either ErrString String)
@@ -196,8 +194,7 @@ select_util db fieldstr tableStr conditions = do
     tbl <- select db tableName fieldNames cond
     case tbl of
         Left err -> return $ Left err
-        Right table -> do contents <- show_table_contents_helper table 
-                          return $ Right $ contents
+        Right table -> return $ Right $ show_table_contents_helper table
 
 -- This is parsed as INSERT INTO tablename(fieldname) VALUES values
 -- I'm pretty sure this needs to be reworked.
@@ -217,24 +214,26 @@ delete_util db tID tableStr conditions = do
 
 bStRep = typeOf(B.empty)
 
-read_in_as_type :: String -> TypeRep -> Element
-read_in_as_type valStr tr | tr == typeOf (undefined::Bool) = Element $ Just $ (read valStr :: Bool)
-                          | tr == typeOf (undefined::Double) = Element $ Just $ (read valStr :: Double)
-                          | tr == typeOf (undefined::B.ByteString) = Element $ Just $ (read valStr :: B.ByteString)
-                          | tr == typeOf (undefined::Int) = Element $ Just $ (read valStr :: Int) 
-                          | otherwise = Element $ Just $ (read valStr::B.ByteString)
-
 -- note: to simplify parsing, all assignmeents are constant and should ignore spaces.
 -- form: x=3 (3 denotes an arbitrary value of the specified type
-parse_assignment :: TVar Database -> Tablename -> String -> STM (Maybe (Row -> Row))
-parse_assignment db tableName text = do
+parse_assignment :: TVar Database -> Tablename -> String -> Row -> STM (Maybe Row)
+parse_assignment db tableName text (Row getter) = do
     let (changedStr:valStr:_) = splitOn "=" text
-        changedName           = Fieldname changedStr
+        changedName              = Fieldname changedStr
     rep <- get_column_type db tableName changedName
-    case rep of 
-      Nothing -> return Nothing
-      Just tr -> return $ Just $ transform_row [(changedName, func tr valStr)] 
-    where func tr valStr _ = read_in_as_type valStr tr
+    if isNothing rep
+    then return Nothing
+    else do
+        newValue <- case rep of
+            Just typeOf(True) -> read valStr :: Bool
+            Just bStRep -> read valStr :: B.ByteString
+            Just typeOf(0) -> read valStr :: Int
+            Just typeOf(0.0) -> read valStr :: Double
+            _    {- fallthrough case -} -> read valStr :: B.ByteString
+        return $ Just $ getField $ \fieldname -> do -- this line has so much bling!
+            if fieldname == changedName
+                then return newValue
+                else return getter fieldname
 
 {- constraints:
     'set' must be to a constant
