@@ -15,15 +15,13 @@ module DBTypes (Tablename(..)
   , RowHash(..)
   , LogOperation(..)
   , Row(..)
-  , Log(..)
-  , ActiveTransactions(..)) where
+  , Log
+  , ActiveTransactions) where
 
 
 import Data.Typeable 
 import Control.Concurrent.STM
-import Control.Concurrent.STM.TChan
 import Test.QuickCheck
-import Control.Monad
 import Data.ByteString (ByteString)
 import Data.List (isPrefixOf, stripPrefix)
 import Data.Maybe
@@ -58,6 +56,7 @@ instance Show Element where
   show (Element x) | typeOf x == typeOf (undefined::Maybe Int)      = "Int" ++ show x
                    | typeOf x == typeOf (undefined::Maybe Double)     = "Double" ++ show x
                    | typeOf x == typeOf (undefined::Maybe ByteString) = "ByteString" ++ show x
+
 
 instance Read Element where
   readsPrec n str | isPrefixOf "Int" str      = map (\(a,b) -> (Element a, b)) $ (readsPrec n :: ReadS (Maybe Int)) $ fromJust $ stripPrefix "Int" str

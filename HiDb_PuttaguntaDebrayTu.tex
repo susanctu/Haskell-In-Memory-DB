@@ -30,17 +30,19 @@ In our Haskell implementation of \texttt{SELECT}, we choose to return a \texttt{
 \subsection{Concurrency} 
 \noindent\begin{minipage}{.45\textwidth}
 \begin{lstlisting}[caption=The data structures used to build up a table.,frame=tlrb, breaklines=true]
+data Database = Database { database :: Map Tablename (TVar Table) }
+
 data Table 
   = Table { rowCounter :: Int 
-          , primaryKey :: Maybe Fieldname 
-          , table :: Map Fieldname Column
-		  }
+              , primaryKey :: Maybe Fieldname 
+              , table :: Map Fieldname Column
+              }
 
 data Column 
   = Column { default_val :: Maybe Element
            , col_type :: TypeRep
            , column :: TVar(Map RowHash (TVar Element))
-           } -- first element is default value
+           } 
 
 data Element = forall a. (Show a, Ord a, Eq a, Read a, Typeable a) => 
   Element (Maybe a) -- Nothing here means that it's null

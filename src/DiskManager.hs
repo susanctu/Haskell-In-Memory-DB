@@ -27,6 +27,7 @@ import Data.Maybe
 import qualified Operation as O
 import System.Directory
 import System.FilePath
+import System.PosixCompat.Files
 --import Server (runServer)
 
 special_folder :: FilePath
@@ -114,7 +115,8 @@ recover db ops = do committed <- undo db ops
                     redo db ops committed
 
 read_db :: IO (TVar Database)
-read_db = do files <- getDirectoryContents special_folder
+read_db = do files_maybe_dir <- getDirectoryContents special_folder
+             files <- filterM (\f -> ((getSymbolicLinkStatus f) >>= (return . isRegularFile))) files_maybe_dir
              db <- flip T.forM id $ Map.fromList $ mapMaybe read_file files
              newTVarIO $ Database db
     where read_file f | takeExtension f == ".log" = Nothing

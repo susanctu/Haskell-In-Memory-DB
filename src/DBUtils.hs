@@ -21,8 +21,8 @@ data ShowableColumn = ShowableColumn { default_val :: Maybe Element
                                      , column :: Map.Map RowHash Element} deriving (Show,Read)
 
 output_table :: Table -> IO String
-output_table table = atomically $ do showable <- from_table table
-                                     return $ show showable
+output_table t = atomically $ do showable <- from_table t
+                                 return $ show showable
 
 from_table :: Table -> STM ShowableTable
 from_table (Table rc pk t) =  do t' <- T.mapM from_column t
@@ -50,14 +50,14 @@ construct_row content = Row $ return . (flip lookup content)
 
 verify_row :: [(Fieldname, Element->Bool)] -> Row -> STM Bool
 verify_row content row = foldr (liftM2 (&&)) (return True) $ zipWith liftM (map (evaluate . snd) content) $ map (getField row) (map fst content) 
-    where evaluate f Nothing   = False
+    where evaluate _ Nothing   = False
           evaluate f (Just x)  = f x
 
 transform_row :: [(Fieldname, Element -> Element)] -> Row -> Row
 transform_row content row = let transformed = zip (map fst content) $ zipWith liftM (map (evaluate . snd) content) $ map (getField row) (map fst content) --type is [(Fieldname, STM Maybe Element)]
                               in Row $ \f -> case lookup f transformed of Just x  -> x
                                                                           Nothing -> return Nothing
-    where evaluate f Nothing  = Nothing
+    where evaluate _ Nothing  = Nothing
           evaluate f (Just x) = Just (f x)
 
 -- char(n) or varchar(n)
