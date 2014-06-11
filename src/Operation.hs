@@ -57,18 +57,18 @@ get_table db tablename =  do
 
 {-Public: Drop the specified table-}
 drop_table :: TVar Database -> TransactionID -> Tablename -> STM (Either (ErrString) [LogOperation])
-drop_table db tr_id tablename_arg = do 
+drop_table db tr_id tablename = do 
   hmdb <- readTVar db
-  table <- get_table db tablename_arg
-  case table of 
-    Just _ -> do writeTVar db  $ Database (L.delete tablename_arg (database hmdb))
-                 return $ Right $ [DropTable tr_id tablename_arg]
-    Nothing -> return $ Left $ ErrString (show(tablename_arg) ++ " not found.")    
+  t <- get_table db tablename
+  case t of 
+    Just _ -> do writeTVar db  $ Database (L.delete tablename (database hmdb))
+                 return $ Right $ [DropTable tr_id tablename]
+    Nothing -> return $ Left $ ErrString (show(tablename) ++ " not found.")    
 
 {-Public: Add a field to a table, with optional specification of default value and primary key-}
 -- Warning: we don't check again that the default value and the typerep are consistent
 alter_table_add :: TVar Database -> TransactionID -> Tablename -> Fieldname -> TypeRep -> Maybe Element -> Bool -> STM (Either (ErrString) [LogOperation]) 
-alter_table_add db tr_id tablename fieldname col_type default_val is_primary_key = do
+alter_table_add db tr_id tablename fieldname col_t default_v is_primary_key = do
   tvar_table <- get_table db tablename
   case tvar_table of 
     Just x -> do t <- readTVar x
@@ -77,10 +77,10 @@ alter_table_add db tr_id tablename fieldname col_type default_val is_primary_key
                                 in if is_primary_key
                                      then do let old_pk = primaryKey t
                                              new_col <- newTVar L.empty
-                                             writeTVar x $ Table (rowCounter t) (Just fieldname) (L.insert fieldname Column{default_val=default_val,col_type=col_type, column=new_col} (table t))
+                                             writeTVar x $ Table (rowCounter t) (Just fieldname) (L.insert fieldname Column{default_val=default_v,col_type=col_t, column=new_col} (table t))
                                              return $ Right [add_op, SetPrimaryKey tr_id old_pk (Just fieldname) tablename]
                                      else do new_col <- newTVar L.empty
-                                             writeTVar x $ Table (rowCounter t) (primaryKey t) (L.insert fieldname Column{default_val=default_val,col_type=col_type, column=new_col} (table t))
+                                             writeTVar x $ Table (rowCounter t) (primaryKey t) (L.insert fieldname Column{default_val=default_v,col_type=col_t, column=new_col} (table t))
                                              return $ Right [add_op]
                    _ -> return $ Left $ ErrString (show(fieldname) ++ "already exists in " ++ show(tablename)) 
     Nothing -> return $ Left $ ErrString (show(tablename) ++ " not found.")    
@@ -157,15 +157,6 @@ get_column_default db tablename fieldname = do
     Just col -> return $ default_val col  
     Nothing -> return Nothing
 
-{-Private: Recursively insert all the provided rows-}
-insert_all_vals :: TransactionID -> [RowHash] -> Tablename -> Table -> [Fieldname] -> [Row] -> STM(Either ErrString Table)
-insert_all_vals tr_id (rh:rowhash) tablename t fieldnames (r:rows) = do
-  res <- insert_vals tr_id rh tablename t fieldnames r [] 
-  case res of 
-    Left str -> return $ Left str 
-    Right (new_t, _) -> insert_all_vals tr_id rowhash tablename new_t fieldnames rows
-insert_all_vals _ _ _ t _ _ = return $ Right t 
-
 {-Private-}
 construct_col_info ::  Table -> Fieldname -> STM (Maybe (Fieldname,Maybe Element,TypeRep))
 construct_col_info t fieldname = case L.lookup fieldname (table t) of
@@ -195,8 +186,17 @@ select db tablename show_fieldnames cond =  do
                    else return $ Left $ ErrString ("Not all fieldnames exist in " ++ show(tablename))                   
     Nothing -> return $ Left $ ErrString (show(tablename) ++ " not found.")
 
-{-Public-}
+{-Public, TODO-}
 {-join :: TVar Database -> Tablename -> Tablename -> (Row -> Row -> Bool) -> Table-}
+
+{-Private: Recursively insert all the provided rows-}
+insert_all_vals :: TransactionID -> [RowHash] -> Tablename -> Table -> [Fieldname] -> [Row] -> STM(Either ErrString Table)
+insert_all_vals tr_id (rh:rowhash) tablename t fieldnames (r:rows) = do
+  res <- insert_vals tr_id rh tablename t fieldnames r [] 
+  case res of 
+    Left str -> return $ Left str 
+    Right _ -> insert_all_vals tr_id rowhash tablename t fieldnames rows
+insert_all_vals _ _ _ t _ _ = return $ Right t 
 
 {-Private: insert values int to the table for the columns specified by [Fieldnames].
   Note that if you're operating on a table in the database, that means you should pass in all the fieldnames
@@ -205,34 +205,32 @@ select db tablename show_fieldnames cond =  do
   for the column.
   Also collects and returns the appropriate LogOperations.
 -}
-insert_vals :: TransactionID -> RowHash -> Tablename -> Table -> [Fieldname] -> Row -> [(Fieldname, Element)] -> STM(Either ErrString (Table, [(Fieldname,Element)]))
+insert_vals :: TransactionID -> RowHash -> Tablename -> Table -> [Fieldname] -> Row -> [(Fieldname, Element)] -> STM(Either ErrString [(Fieldname,Element)])
 insert_vals tr_id rowhash tablename t (f:fieldnames) row logOps = do
   maybe_elem <- (getField row) f
   case maybe_elem of 
-    Just new_elem -> do res <- insert_val_helper tr_id rowhash tablename t f new_elem
+    Just new_elem -> do res <- insert_val_helper rowhash t f new_elem
                         case res of 
                           Left str -> return $ Left str
-                          Right (new_table, new_logOp) -> insert_vals tr_id rowhash tablename new_table fieldnames row (new_logOp:logOps)
+                          Right new_logOp -> insert_vals tr_id rowhash tablename t fieldnames row (new_logOp:logOps)
     Nothing -> case L.lookup f (table t) of
                  Nothing -> return $ Left $ ErrString ("DB error")
                  Just col -> case default_val col of 
-                               Just val -> do res <- insert_val_helper tr_id rowhash tablename t f val
+                               Just val -> do res <- insert_val_helper rowhash t f val
                                               case res of 
                                                 Left str -> return $ Left str
-                                                Right (new_table, new_logOp) -> insert_vals tr_id rowhash tablename new_table fieldnames row (new_logOp:logOps)   
+                                                Right new_logOp -> insert_vals tr_id rowhash tablename t fieldnames row (new_logOp:logOps)   
                                Nothing -> return $ Left $ ErrString "DB error"
-insert_vals _ _ _ t _ _ logOps = return $ Right (t, logOps)
+insert_vals _ _ _ _ _ _ logOps = return $ Right logOps
 
 {-Private-}
-insert_val_helper :: TransactionID -> RowHash -> Tablename -> Table -> Fieldname -> Element -> STM (Either ErrString (Table, (Fieldname,Element))) 
-insert_val_helper tr_id rowhash tablename t f new_elem = let new_logOp = (f, new_elem) 
+insert_val_helper :: RowHash -> Table -> Fieldname -> Element -> STM (Either ErrString (Fieldname,Element))
+insert_val_helper (RowHash rh) t f new_elem = let new_logOp = (f, new_elem) 
   in case L.lookup f (table t) of
        Just c -> do col_map <- readTVar $ column c
                     new_tvar_elem <- newTVar new_elem
-                    new_col_map <- newTVar $ L.insert rowhash new_tvar_elem (col_map)
-                    let new_col = Column (default_val c) (col_type c) new_col_map
-                    let new_table = Table ((rowCounter t) +1) (primaryKey t) (L.insert f new_col (table t))
-                    return $ Right (new_table, new_logOp)
+                    writeTVar (column c) $ L.insert (RowHash rh) new_tvar_elem (col_map)
+                    return $ Right new_logOp
        Nothing -> return $ Left (ErrString "DB error")
 
 {-Private: Get a list of fieldnames for which default_val was Nothing-}
@@ -262,11 +260,11 @@ insert db tr_id tablename row = do
     Just x -> do t <- readTVar x -- t is of type Table
                  has_required_vals <- M.foldrM (check_defaults row) True $ get_fields_without_defaults t
                  if has_required_vals
-                    then do res <- insert_vals tr_id (RowHash((rowCounter t) + 1)) tablename t (get_all_fields t) row []
+                    then do res <- insert_vals tr_id (RowHash((rowCounter t)+1)) tablename t (get_all_fields t) row []
                             case res of 
                               Left err_str -> return $ Left err_str 
-                              Right (new_t, logOps) -> do writeTVar x new_t
-                                                          return $ Right $ Insert tr_id (tablename, RowHash((rowCounter t) + 1)) logOps
+                              Right logOps -> do writeTVar x (Table{rowCounter=(rowCounter t) + 1, primaryKey=(primaryKey t), table=(table t)})
+                                                 return $ Right $ Insert tr_id (tablename, RowHash((rowCounter t) + 1)) logOps
                     else return $ Left(ErrString ("Failed to provide values for all columns in " ++ show(tablename) ++ " with no default"))
     Nothing -> return $ Left(ErrString (show(tablename) ++ " not found."))    
 
@@ -279,7 +277,7 @@ show_table_contents db tablename = do
                           show_table_contents_helper t 
     Nothing -> return ""
 
-{-Private-}
+{-Public-}
 show_table_contents_helper :: Table -> STM(String)
 show_table_contents_helper t = let pk = show(primaryKey t) 
                                    fieldnames = L.keys $ table t
@@ -287,7 +285,7 @@ show_table_contents_helper t = let pk = show(primaryKey t)
                                    in do (_, rows) <- get_rows (table t) (verify_row (fmap (\f -> (f, func)) fieldnames)) 
                                          row_strs <- sequence $ fmap (printRow fieldnames) rows 
                                          return $ "Primary key:" ++ pk ++ "\n" ++ unwords(scheme) ++ "\n" ++ unlines(row_strs)
-                                      where func element = True
+                                      where func _ = True
 
 {-Private-}
 printRow :: [Fieldname] -> Row -> STM(String)

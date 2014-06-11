@@ -1,3 +1,18 @@
+module DiskManager (special_folder
+  , log_file
+  , table_file
+  , write_db
+  , flush_log
+  , consume_log
+  , run_checkpoint
+  , undo
+  , redo
+  , recover
+  , read_db
+  , read_log
+  , hydrate
+  , start_db) where
+
 import DBTypes
 import DBUtils
 import Control.Concurrent
@@ -12,6 +27,7 @@ import Data.Maybe
 import qualified Operation as O
 import System.Directory
 import System.FilePath
+import System.PosixCompat.Files
 --import Server (runServer)
 
 special_folder :: FilePath
@@ -45,25 +61,23 @@ consume_log l active = do flag <- should_consume l active
                             then (atomically $ readTChan l) >> consume_log l active
                             else return ()
 
-    where should_consume l active = do l_copy <- atomically $ dupTChan l
-                                       op <- atomically $ readTChan l_copy
-                                       case op of Start trans_id -> return $ Set.notMember trans_id active
-                                                  _              -> return True
+    where should_consume l active = do op <- atomically $ tryPeekTChan l
+                                       case op of Just (Start trans_id) -> return $ Set.notMember trans_id active
+                                                  Nothing               -> return False
+                                                  _                     -> return True
 
 run_checkpoint :: TVar Database -> Log -> TVar ActiveTransactions -> IO ()
-run_checkpoint db l active = do threadDelay 30000000 --thirty seconds
+run_checkpoint db l active = do threadDelay 3 --thirty seconds
                                 flush_log l
                                 (unwrapped_db, unwrapped_active) <- atomically $ do a <- readTVar db
                                                                                     b <- readTVar active
+                                                                                    writeTChan l $ StartCheckpoint $ Set.toList b
                                                                                     return (a,b)
-                                checkpoint unwrapped_db l unwrapped_active
+                                write_db unwrapped_db
+                                atomically $ writeTChan l EndCheckpoint
                                 consume_log l unwrapped_active
                                 flush_log l
                                 run_checkpoint db l active
-    where checkpoint db l active = do
-            atomically $ writeTChan l $ StartCheckpoint $ Set.toList active
-            write_db $ db
-            atomically $ writeTChan l EndCheckpoint
 
 undo :: TVar Database -> [LogOperation] -> IO (Set.Set TransactionID)
 undo db ops = foldr (process db) (return Set.empty) ops
@@ -99,7 +113,8 @@ recover db ops = do committed <- undo db ops
                     redo db ops committed
 
 read_db :: IO (TVar Database)
-read_db = do files <- getDirectoryContents special_folder
+read_db = do files_maybe_dir <- getDirectoryContents special_folder
+             files <- filterM (\f -> ((getSymbolicLinkStatus f) >>= (return . isRegularFile))) files_maybe_dir
              db <- flip T.forM id $ Map.fromList $ mapMaybe read_file files
              newTVarIO $ Database db
     where read_file f | takeExtension f == ".log" = Nothing
