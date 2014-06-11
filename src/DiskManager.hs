@@ -70,15 +70,13 @@ run_checkpoint db l active = do threadDelay 3 --thirty seconds
                                 flush_log l
                                 (unwrapped_db, unwrapped_active) <- atomically $ do a <- readTVar db
                                                                                     b <- readTVar active
+                                                                                    writeTChan l $ StartCheckpoint $ Set.toList b
                                                                                     return (a,b)
-                                checkpoint unwrapped_db l unwrapped_active
+                                write_db unwrapped_db
+                                atomically $ writeTChan l EndCheckpoint
                                 consume_log l unwrapped_active
                                 flush_log l
                                 run_checkpoint db l active
-    where checkpoint db l active = do
-            atomically $ writeTChan l $ StartCheckpoint $ Set.toList active
-            write_db $ db
-            atomically $ writeTChan l EndCheckpoint
 
 undo :: TVar Database -> [LogOperation] -> IO (Set.Set TransactionID)
 undo db ops = foldr (process db) (return Set.empty) ops
