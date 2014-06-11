@@ -149,7 +149,6 @@ test_write_and_hydrate = do let tablename1  = D.Tablename "sample_table1"
                                                                                    Right logOps -> do _ <- mapM (writeTChan l) logOps 
                                                                                                       --edb <- readTVar db 
                                                                                                       return (db, l, at) 
-                            putStrLn "hi"
                             DM.run_checkpoint hdb l at 
                             --DM.write_db hdb 
                             return ""
