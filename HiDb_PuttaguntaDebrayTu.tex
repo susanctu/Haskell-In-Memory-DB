@@ -97,6 +97,14 @@ The only need for this repairing is when the database is starting up, at which p
 
 As currently described, the log will continuously grow, getting overwhelmingly large before long - the final detail to discuss is shrinking the log. We can delete a transaction in the log after we are sure that the entire transaction has been pushed to disk. In particular, if we start a checkpoint after a transaction has committed, we can remove that transaction from the log once the checkpoint terminates. As such, we trim and flush (again) the log after finishing a checkpoint.
 
+
+\subsection{Serializing}
+As our objects representing the database are wrapped in \texttt{TVar}s, we cannot define a method like \texttt{show} that converts a \texttt{Table} to a \texttt{String} without using an unsafe function such as \texttt{unsafePerformIO}. We can, however, define a function with the type \texttt{Table -> IO String}. Similarly we also can define a function with the type \texttt{String -> IO (TVar Table)}.
+
+Since we couldn't use automatically derived instances of \texttt{show} and \texttt{read}, we were faced with two prospects - manually write the encoding for our Objects or to somehow convert them into data structures that can derive \texttt{show} and \texttt{read}. The latter route seemed safer and much easier, so we defined two (private) data structures \texttt{ShowableTable} and \texttt{ShowableColumn} that derive \texttt{show} and \texttt{read}. Converting between our regular \texttt{Table} and \texttt{Column} data structures and their showable variants is simply a matter of extracting all of the necessary variables from their \texttt{TVar} containers.
+
+The last problem with respect to serialization is serializing the existentially quantified data structure \texttt{Element}. We must know the type of the element stored in the \texttt{Element} if we want to \texttt{read} it. As we only use three different types in our database, we simply prepend the type in \texttt{show} and then check the prefix to identify the type during \texttt{read}. We use a similar procedure to serialize the types of a column (stored as a \texttt{TypeRep}).
+
 \section{Summary \& Future Work}
 We found that Haskell's support for lightweight threads and the \texttt{STM} module were, as expected, very well-suited to database implementation. However, we also need dynamic types, which difficult to program with given Haskell's unusually strong type system. Furthermore, we found it difficult to implement the Operation module cleanly; the code indeed appears quite imperative due the constant use of \texttt{do} notation (which we could have replaced with \texttt{>>=}, but we do not believe that would have made the code any easier to read). 
 
