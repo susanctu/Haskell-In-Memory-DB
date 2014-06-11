@@ -114,14 +114,16 @@ recover db ops = do committed <- undo db ops
 
 read_db :: IO (TVar Database)
 read_db = do files_maybe_dir <- getDirectoryContents special_folder
-             files <- filterM (\f -> ((getSymbolicLinkStatus f) >>= (return . isRegularFile))) files_maybe_dir
+             files <- filterM (\f -> ((getSymbolicLinkStatus f) >>= (return . isRegularFile))) $ map ((</>) special_folder) files_maybe_dir
              db <- flip T.forM id $ Map.fromList $ mapMaybe read_file files
              newTVarIO $ Database db
     where read_file f | takeExtension f == ".log" = Nothing
                       | otherwise                 = Just (Tablename $ takeBaseName f, readFile f >>= read_table)
 
 read_log :: IO [LogOperation]
-read_log = liftM read $ readFile log_file
+read_log = do exists <- doesFileExist log_file
+              if exists then liftM read $ readFile log_file
+                        else return []
 
 hydrate :: IO (TVar Database)
 hydrate = do createDirectoryIfMissing False special_folder

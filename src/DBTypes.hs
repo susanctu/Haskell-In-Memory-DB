@@ -23,10 +23,13 @@ import Data.Typeable
 import Control.Concurrent.STM
 import Test.QuickCheck
 import Data.ByteString (ByteString)
+import Data.Char
 import Data.List (isPrefixOf, stripPrefix)
 import Data.Maybe
 import Data.Map.Lazy (Map)
 import Data.Set (Set)
+
+import System.IO.Unsafe
 
 
 newtype Tablename = Tablename String deriving(Ord, Eq, Show, Read)
@@ -53,15 +56,16 @@ data Column = Column { default_val :: Maybe Element
 data Element = forall a. (Show a, Ord a, Eq a, Read a, Typeable a) => Element (Maybe a) -- Nothing here means that it's null
 
 instance Show Element where
-  show (Element x) | typeOf x == typeOf (undefined::Maybe Int)      = "Int" ++ show x
+  show (Element x) | typeOf x == typeOf (undefined::Maybe Int)        = "Int" ++ show x
                    | typeOf x == typeOf (undefined::Maybe Double)     = "Double" ++ show x
                    | typeOf x == typeOf (undefined::Maybe ByteString) = "ByteString" ++ show x
 
 
 instance Read Element where
-  readsPrec n str | isPrefixOf "Int" str      = map (\(a,b) -> (Element a, b)) $ (readsPrec n :: ReadS (Maybe Int)) $ fromJust $ stripPrefix "Int" str
-                  | isPrefixOf "Double" str     = map (\(a,b) -> (Element a, b)) $ (readsPrec n :: ReadS (Maybe Double)) $ fromJust $ stripPrefix "Double" str
-                  | isPrefixOf "ByteString" str = map (\(a,b) -> (Element a, b)) $ (readsPrec n :: ReadS (Maybe ByteString)) $ fromJust $ stripPrefix "ByteString" str
+  readsPrec _ str' = let help str | isPrefixOf "Int" str        = map (\(a,b) -> (Element a, b)) $ (readsPrec 0 :: ReadS (Maybe Int)) $ fromJust $ stripPrefix "Int" str
+                                  | isPrefixOf "Double" str     = map (\(a,b) -> (Element a, b)) $ (readsPrec 0 :: ReadS (Maybe Double)) $ fromJust $ stripPrefix "Double" str
+                                  | isPrefixOf "ByteString" str = map (\(a,b) -> (Element a, b)) $ (readsPrec 0 :: ReadS (Maybe ByteString)) $ fromJust $ stripPrefix "ByteString" str
+                      in help $ dropWhile isSpace str'
 
 instance Eq Element where
   (Element mx) == (Element my) = case cast mx of Just typed_mx -> typed_mx == my

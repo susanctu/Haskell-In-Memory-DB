@@ -24,7 +24,8 @@ main = do output <- sequence $ [test_create_table
                                 ,test_select
                                 ,test_delete
                                 ,test_update
-                                ,test_write_and_hydrate
+                                ,test_write_and_hydrate_more
+                                --,test_write_and_hydrate
                                 ]
           mapM putStrLn output
           return ()
@@ -156,6 +157,35 @@ test_write_and_hydrate = do let tablename1  = D.Tablename "sample_table1"
                             --atomically $ do t1_after <- O.show_table_contents tvar_db tablename1 
                               --              --t2_after <- O.show_table_contents tvar_db tablename2
                               --              return $ t1_after
+
+test_write_and_hydrate_more :: IO String
+test_write_and_hydrate_more = do let tablename1  = D.Tablename "sample_table1"
+                                 let tablename2 = D.Tablename "sample_table2"
+                                 (hdb, l, at) <- atomically $ do let field_and_default1 =  [(D.Fieldname "table1_field1", 1), (D.Fieldname "table1_field2", 2)]
+                                                                 let field_and_default2 = [(D.Fieldname "table2_field1", 1)]
+                                                                 db <- create_empty_db
+                                                                 l <- newTChan::STM(TChan D.LogOperation)
+                                                                 at <- newTVar (S.empty)
+                                                                 should_be_logOps <- O.create_table db (D.TransactionID "blah" 0) tablename1 (fmap (\(f, d)-> (f, Just(D.Element(Just d)), typeOf(d::Int))) field_and_default1) Nothing
+                                                                 case should_be_logOps of 
+                                                                   Left errstring -> do edb <- readTVar db
+                                                                                        return (edb, l, at) -- should not happen
+                                                                   Right logOps -> do _ <- mapM (writeTChan l) logOps 
+                                                                                      should_be_logOps2 <- populateTable db tablename1 0 5
+                                                                                      case should_be_logOps2 of 
+                                                                                        Left errstring -> do edb <- readTVar db
+                                                                                                             return (edb, l, at) -- should not happen
+                                                                                        Right logOps -> do _ <- mapM (writeTChan l) logOps 
+                                                                                                           edb <- readTVar db 
+                                                                                                           return (edb, l, at) 
+                                 
+                                 DM.write_db hdb 
+                                 --DM.run_checkpoint hdb l at 
+                                 tvar_db <- DM.hydrate
+                                 atomically $ O.show_table_contents tvar_db tablename1
+                                 --atomically $ do t1_after <- O.show_table_contents tvar_db tablename1 
+                                   --              --t2_after <- O.show_table_contents tvar_db tablename2
+                                   --              return $ t1_after
 
 -- this will populate the table with increasing integers 1, 2, 3, etc.
 populateTable :: TVar D.Database -> D.Tablename -> Int -> Int -> STM(Either D.ErrString [D.LogOperation]) 
