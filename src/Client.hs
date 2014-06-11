@@ -28,8 +28,9 @@ handleShowing h = do
 	next <- hGetLine h
 	case next of
 		"DONE" -> return ()
-		_	   -> do hPutStrLn stdout next
-					 handleShowing h
+		_	   -> do
+			hPutStrLn stdout next
+			handleShowing h
 
 -- actually execute stuff, and return the result to us.
 runTransaction :: Handle -> [String] -> IO ()

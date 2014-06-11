@@ -16,7 +16,8 @@ library
     Operation,
     DBTypes,
     DBUtils,
-    DiskManager
+    DiskManager,
+    Client
   build-depends:
     base < 5
     ,stm > 2.4
