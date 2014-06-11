@@ -61,10 +61,10 @@ consume_log l active = do flag <- should_consume l active
                             then (atomically $ readTChan l) >> consume_log l active
                             else return ()
 
-    where should_consume l active = do l_copy <- atomically $ dupTChan l
-                                       op <- atomically $ readTChan l_copy
-                                       case op of Start trans_id -> return $ Set.notMember trans_id active
-                                                  _              -> return True
+    where should_consume l active = do op <- atomically $ tryPeekTChan l
+                                       case op of Just (Start trans_id) -> return $ Set.notMember trans_id active
+                                                  Nothing               -> return False
+                                                  _                     -> return True
 
 run_checkpoint :: TVar Database -> Log -> TVar ActiveTransactions -> IO ()
 run_checkpoint db l active = do threadDelay 3 --thirty seconds
