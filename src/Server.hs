@@ -12,6 +12,7 @@ import Control.Monad
 import qualified Data.ByteString as B
 import Data.List (findIndex)
 import Data.List.Split (splitOneOf, splitOn)
+import Data.Maybe (isNothing)
 import qualified Data.Set as S
 import qualified Data.Map as M
 import Data.Typeable
@@ -26,19 +27,6 @@ import Operation
 
 type QueryResult = Either ErrString [LogOperation]
 
-{- The following two functions aren't the best designed, but I'm not sure we want to
--- make the distinction.
--- char(n) or varchar(n)
- -}
-isCharType :: String -> Bool
-isCharType s = take 4 s == "char" || take 7 s == "varchar"
-
--- Haskell doesn't seem to have a native bit-array type, so not clear what we should do.
--- I like the idea of a (relatively) packed array of Bools, though!
--- bit(n) or bitvarying(n)
-isBitType :: String -> Bool
-isBitType s = take 3 s == "bit" -- since there are only so many types
-
 -- generates the default value from the array... or Nothing.
 obtainDefault :: [String] -> Maybe String
 obtainDefault xs
@@ -50,15 +38,6 @@ detectPrimaryKey :: [String] -> Maybe Fieldname
 detectPrimaryKey fieldInfo = case (filter (\args -> head (words args) == "PRIMARY") fieldInfo) of
     x:_ -> Just $ Fieldname $ (words x) !! 2 -- since it's of the form PRIMARY KEY fieldname
     []    -> Nothing
-
--- why was this commented out...?
-readType :: String -> TypeRep
-readType ftype
-    | ftype == "boolean" = typeOf(undefined :: Bool)
-    | isCharType ftype || isBitType ftype = typeOf(undefined :: B.ByteString)
-    | ftype == "integer" = typeOf(undefined :: Int)
-    | ftype == "real"    = typeOf(undefined :: Double)
-    | otherwise = typeOf(undefined :: B.ByteString)
 
 --inelegant, but sort-of polymorphism.
 getBool :: Maybe String -> Maybe Bool
@@ -148,21 +127,21 @@ check_parens elems = (count elems 0) == 0
 -- an integer, or a fieldname.
 isConstantConstraint :: String -> Bool
 isConstantConstraint s
-	| '0' <= head s && head s <= '9' = True
-	| head s == '"'					 = True
-	| head s == '\''				 = True
-	| otherwise						 = False
+    | '0' <= head s && head s <= '9' = True
+    | head s == '"'                     = True
+    | head s == '\''                 = True
+    | otherwise                         = False
 
 -- difficulty here is reading the type without access to the table...
 {-createOp :: String -> String -> String -> M.Map Fieldname (Element -> Bool)
 createOp op left right = singleton left fn
-	where fn a = case op of
+    where fn a = case op of
     ">"  -> a > 
     "<"  ->
     ">=" ->
     "<=" ->
     "==" ->
-	-- only work on strings, but we can tell the type...
+    -- only work on strings, but we can tell the type...
     "in" ->
     "contains" -> -}
 createOp = undefined
@@ -183,97 +162,113 @@ leftEq s (Left t)  = s == t
 
 findParens :: [Either String (M.Map Fieldname (Element -> Bool))] -> Maybe (Int, Int)
 findParens es = do
-	firstLeft <- findIndex (leftEq "(") es
-	nextRight <- (liftM2 (\a b -> a + b)) (Just $ 1+firstLeft) $ findIndex (leftEq ")") (drop (1+firstLeft) es)
-	prevLeft <- (liftM2 (\a b -> a - b)) (Just $ length es) $ findIndex (leftEq"(") (drop (length es - nextRight) $ reverse es)
-	return (prevLeft, nextRight)
+    firstLeft <- findIndex (leftEq "(") es
+    nextRight <- (liftM2 (\a b -> a + b)) (Just $ 1+firstLeft) $ findIndex (leftEq ")") (drop (1+firstLeft) es)
+    prevLeft <- (liftM2 (\a b -> a - b)) (Just $ length es) $ findIndex (leftEq"(") (drop (length es - nextRight) $ reverse es)
+    return (prevLeft, nextRight)
 
 -- need to replace elem with something that only compares on the left.
 merge :: [Either String (M.Map Fieldname (Element -> Bool))] -> M.Map Fieldname (Element -> Bool)
 merge es | elem (Left "(") es   =
         case findParens es of
-			Just (start, end) ->
-				merge $ (take start es) ++ ([Right $ merge (drop (start+1) (take (end) es))]) ++ (drop (end+1) es)
-			Nothing -> M.empty
+            Just (start, end) ->
+                merge $ (take start es) ++ ([Right $ merge (drop (start+1) (take (end) es))]) ++ (drop (end+1) es)
+            Nothing -> M.empty
          | elem (Left "and") es = undefined
          | elem (Left "or") es  = undefined
          | null es              = M.empty
          | (Right e:[]) <- es   = e
 
-parse_predicate :: String -> Row -> STM Bool
-parse_predicate cond = let elems = split cond
+parse_predicate :: [String] -> Row -> STM Bool
+parse_predicate conds = let elems = split $ head conds
                          in if check_parens elems then verify_row $ M.toList $ merge $ transform elems
                                                   else (\_ -> do return False)
 
 -- Note: for ease of parsing, the fieldnames should be separated only by commas, not spaces
 -- this is not hard to fix, but definitely beside the point of the database.
-select_util :: TVar Database -> TransactionID -> String -> String -> [String] -> STM QueryResult
-select_util db fieldstr tablestr conditions = do
-	let fieldNames  = map Fieldname $ splitOn "," fieldstr
-		cond	    = parse_predicate conditions
-		tableName   = TableName tableStr
-	select db tableName fieldNames cond
+select_util :: TVar Database -> String -> String -> [String] -> STM (Either ErrString String)
+select_util db fieldstr tableStr conditions = do
+    let fieldNames  = map Fieldname $ splitOn "," fieldstr
+        cond        = parse_predicate conditions
+        tableName   = Tablename tableStr
+    tbl <- select db tableName fieldNames cond
+    case tbl of
+        Left err -> return $ Left err
+        Right table -> return $ Right $ show_table_contents_helper table
 
 -- This is parsed as INSERT INTO tablename(fieldname) VALUES values
 -- I'm pretty sure this needs to be reworked.
 {-insert_util :: TVar Database -> TransactionID -> String -> String -> STM QueryResult
 insert_util db tID tableData values = do
     hash <- getStdRandom random -- this is still an Int; needs to be converted into a RowHash
-    insert db tID (RowHash rowHash) (TableName tablename) {- values -}
+    insert db tID (RowHash rowHash) (Tablename tablename) {- values -}
     where (tablename:fieldname:_) = splitOneOf "()" tableData
           valueList = splitOneOf "(:); " values
 -}
 
 delete_util :: TVar Database -> TransactionID -> String -> [String] -> STM QueryResult
 delete_util db tID tableStr conditions = do
-	let tableName = TableName tableStr
-		cond	  = parse_predicate conditions
-	delete db tID tableName cond
+    let tableName = Tablename tableStr
+        cond      = parse_predicate conditions
+    delete db tID tableName cond
+
+bStRep = typeOf(B.empty)
 
 -- note: to simplify parsing, all assignmeents are constant and should ignore spaces.
 -- form: x=3 (3 denotes an arbitrary value of the specified type
-parse_assignment :: TVar Database -> Tablename -> String -> STM (Maybe (Row -> Row))
+parse_assignment :: TVar Database -> Tablename -> String -> Row -> STM (Maybe Row)
 parse_assignment db tableName text (Row getter) = do
-	let (changedStr:valStr:_) = splitOn "=" text
-		changedName			  = FieldName changedStr
-	rep <- get_column_type db tableName fieldName
-	if isNothing rep
-	then return Nothing
-	else do
-		let newValue = case rep of
-			Just typeOf(undefined :: Bool)		   -> read valStr :: Bool
-			Just typeOf(undefined :: B.ByteString) -> read valStr :: B.ByteString
-			Just typeOf(undefined :: Int)		   -> read valStr :: Int
-			Just typeOf(undefined :: Double)	   -> read valStr :: Double
-			_	{- fallthrough case -}			   -> read valStr :: B.ByteString
-		return $ Just $ getField $ \fieldname -> do -- this line has so much bling!
-			if fieldname == changedName
-				then return newValue
-				else return getter fieldname
+    let (changedStr:valStr:_) = splitOn "=" text
+        changedName              = Fieldname changedStr
+    rep <- get_column_type db tableName changedName
+    if isNothing rep
+    then return Nothing
+    else do
+        newValue <- case rep of
+            Just typeOf(True) -> read valStr :: Bool
+            Just bStRep -> read valStr :: B.ByteString
+            Just typeOf(0) -> read valStr :: Int
+            Just typeOf(0.0) -> read valStr :: Double
+            _    {- fallthrough case -} -> read valStr :: B.ByteString
+        return $ Just $ getField $ \fieldname -> do -- this line has so much bling!
+            if fieldname == changedName
+                then return newValue
+                else return getter fieldname
 
 {- constraints:
-	'set' must be to a constant
-		  must be only one column
-	the updating condition should not have spaces in it. Sorry!
+    'set' must be to a constant
+          must be only one column
+    the updating condition should not have spaces in it. Sorry!
 -}
 update_util :: TVar Database -> TransactionID -> String -> String -> [String] -> STM QueryResult
 update_util db tID tableStr assignStr conditions = do
-	let tableName	= TableName tableStr
-		cond		= parse_predicate conditions
-	changes <- parse_assignment db tableName assignStr
-	case changes of
-		Just changeFn -> update db tID tableName conditions changeFn
-		Nothing		  -> Left $ ErrString "Could not match supplied fieldname to an actual column."
+    let tableName    = Tablename tableStr
+        cond        = parse_predicate conditions
+    changes <- parse_assignment db tableName assignStr
+    case changes of
+        Just changeFn -> update db tID tableName cond changeFn
+        Nothing       -> return $ Left $ ErrString "Could not match supplied fieldname to an actual column."
 
 parseCommand :: TVar Database -> TransactionID -> [String] -> STM QueryResult
 parseCommand db tID ("CREATE":"TABLE":tablename:xs) = create_util db tID tablename $ unwords xs
 parseCommand db tID ["DROP", "TABLE", tablename] = drop_table db tID (Tablename tablename)
 parseCommand db tID ["ALTER", "TABLE", tablename, "ADD", fieldname, typename] = alter_add_util db tID tablename fieldname typename
 parseCommand db tID ["ALTER", "TABLE", tablename, "DROP", fieldname] = alter_drop_util db tID tablename fieldname
-parseCommand db _ ("SELECT":fieldnames:"FROM":tablename:"WHERE":xs) = select_util db fieldnames tablename xs
-parseCommand db tID ("DELETE":"FROM":tablename:"WHERE":xs) = delete_util db tID tablename conditions
+-- SELECT handled separately, since it doesn't log anything
+parseCommand db tID ("DELETE":"FROM":tablename:"WHERE":xs) = delete_util db tID tablename xs
 parseCommand db tID ("UPDATE":tablename:"SET":conditions:"WHERE":xs) = update_util db tID tablename conditions xs
 parseCommand _ _ _ = return $ Left $ ErrString "Command not found."
+
+-- separate case for SELECT, since it doesn't log anything
+selectParser :: Handle -> TVar Database -> [String] -> IO ()
+selectParser h db ("SELECT":fieldnames:"FROM":tablename:"WHERE":xs) = do
+    result <- atomically $ select_util db fieldnames tablename xs
+    case result of
+        Left err -> hPutStrLn h "Error: SELECT statement improperly formed."
+        Right tbl -> do
+            hPutStrLn h "SHOWING"
+            hPutStrLn h $ show tbl
+            hPutStrLn h "DONE"
 
 -- to handle error-checking, since it would be a bit awkward within atomicAction
 -- recurses by passing in the LogOperations done thus far, so it can quit if need be.
@@ -318,11 +313,11 @@ incrementTId tID = TransactionID {
 -- thus forcing it to be given its own atomic command.
 altersTable :: String -> Bool
 altersTable s =
-	case words s of
-		("CREATE":"TABLE":_) -> True
-		("DROP":"TABLE":_)   -> True
-		("ALTER":"TABLE":_)  -> True
-		_					 -> False
+    case words s of
+        ("CREATE":"TABLE":_) -> True
+        ("DROP":"TABLE":_)   -> True
+        ("ALTER":"TABLE":_)  -> True
+        _                     -> False
 
 {- Split off recursively: all requests that don't modify the table should be done atomically.
    Those that do modify the table should be done in their own call to atomically.
@@ -357,20 +352,21 @@ readCmds h arr = do
 
 show_util :: TVar Database -> Handle -> IO ()
 show_util db h = do
-	hPutStrLn h "SHOWING"
-	hPutStrLn h $ atomically $ show_tables db
-	hPutStrLn h "DONE"
+    hPutStrLn h "SHOWING"
+    atomically (show_tables db) >>= hPutStrLn h
+    hPutStrLn h "DONE"
 
 -- loops a session with a single client. Runs in its own thread.
 clientSession :: TVar Database -> TVar ActiveTransactions -> Log ->
                  TransactionID -> Handle -> String -> IO ()
 clientSession db transSet logger tID h name = do
     cmds <- readCmds h []
-    case (head cmds) of
-        "QUIT" -> do
+    case (words $ head cmds) of
+        ["QUIT"] -> do
             hClose h
             return ()
-        "SHOW TABLES" -> show_util db h
+        ["SHOW","TABLES"] -> show_util db h
+        ("SELECT":xs) -> selectParser h db ("SELECT":xs)
         _ -> do
             result <- executeRequests db transSet logger tID cmds
             case result of
