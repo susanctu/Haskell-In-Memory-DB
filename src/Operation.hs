@@ -56,18 +56,18 @@ get_table db tablename =  do
 
 {-Public: Drop the specified table-}
 drop_table :: TVar Database -> TransactionID -> Tablename -> STM (Either (ErrString) [LogOperation])
-drop_table db tr_id tablename_arg = do 
+drop_table db tr_id tablename = do 
   hmdb <- readTVar db
-  table <- get_table db tablename_arg
-  case table of 
-    Just _ -> do writeTVar db  $ Database (L.delete tablename_arg (database hmdb))
-                 return $ Right $ [DropTable tr_id tablename_arg]
-    Nothing -> return $ Left $ ErrString (show(tablename_arg) ++ " not found.")    
+  t <- get_table db tablename
+  case t of 
+    Just _ -> do writeTVar db  $ Database (L.delete tablename (database hmdb))
+                 return $ Right $ [DropTable tr_id tablename]
+    Nothing -> return $ Left $ ErrString (show(tablename) ++ " not found.")    
 
 {-Public: Add a field to a table, with optional specification of default value and primary key-}
 -- Warning: we don't check again that the default value and the typerep are consistent
 alter_table_add :: TVar Database -> TransactionID -> Tablename -> Fieldname -> TypeRep -> Maybe Element -> Bool -> STM (Either (ErrString) [LogOperation]) 
-alter_table_add db tr_id tablename fieldname col_type default_val is_primary_key = do
+alter_table_add db tr_id tablename fieldname col_t default_v is_primary_key = do
   tvar_table <- get_table db tablename
   case tvar_table of 
     Just x -> do t <- readTVar x
@@ -76,10 +76,10 @@ alter_table_add db tr_id tablename fieldname col_type default_val is_primary_key
                                 in if is_primary_key
                                      then do let old_pk = primaryKey t
                                              new_col <- newTVar L.empty
-                                             writeTVar x $ Table (rowCounter t) (Just fieldname) (L.insert fieldname Column{default_val=default_val,col_type=col_type, column=new_col} (table t))
+                                             writeTVar x $ Table (rowCounter t) (Just fieldname) (L.insert fieldname Column{default_val=default_v,col_type=col_t, column=new_col} (table t))
                                              return $ Right [add_op, SetPrimaryKey tr_id old_pk (Just fieldname) tablename]
                                      else do new_col <- newTVar L.empty
-                                             writeTVar x $ Table (rowCounter t) (primaryKey t) (L.insert fieldname Column{default_val=default_val,col_type=col_type, column=new_col} (table t))
+                                             writeTVar x $ Table (rowCounter t) (primaryKey t) (L.insert fieldname Column{default_val=default_v,col_type=col_t, column=new_col} (table t))
                                              return $ Right [add_op]
                    _ -> return $ Left $ ErrString (show(fieldname) ++ "already exists in " ++ show(tablename)) 
     Nothing -> return $ Left $ ErrString (show(tablename) ++ " not found.")    
