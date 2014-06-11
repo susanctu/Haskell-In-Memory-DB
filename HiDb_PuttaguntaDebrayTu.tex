@@ -15,9 +15,9 @@ We describe our experience implementing an in-memory relational database in Hask
 \begin{multicols}{2}
 
 \section{Introduction} 
-Haskell's \texttt{STM} module provides an alternative to lock-based programming that we suspected would be particularily well-suited to database implementation. \texttt{STM}, because it builds up actions but only commits them if all pointers contained in \texttt{Tvar}s have not been changed since they have been read for that transaction, shields the programmer from having to worry about correctness in a concurrent environment. Uncommitted transactions can be retried, which is exactly what we need in a database implementation. At the same time, the module provides an appropriate level of granularity; if the value in a \texttt{STM} that was not read for a transaction changes as the transaction is being built up, the transaction will still commit. Moreover, the module's \texttt{atomically :: STM a -> IO a} function provides a clean abstraction with which to group actions into a single atomic action, suggesting that \texttt{STM} would make it simple to group database operations into transactions \cite{harris}. 
+Haskell's \texttt{STM} module provides an alternative to lock-based programming that we suspected would be particularily well-suited to database implementation. \texttt{STM} shields the programmer from having to worry about correctness in a concurrent environment because it builds up actions but only commits them if all pointers contained in \texttt{TVar}s have not been changed since they have been read for that transaction. Uncommitted transactions can be retried, which is exactly what we need in a database implementation. At the same time, the module provides an appropriate level of granularity; if the value in a \texttt{STM} that was not read for a transaction changes as the transaction is being built up, the transaction will still commit. Moreover, the module's \texttt{atomically :: STM a -> IO a} function provides a clean abstraction with which to group actions into a single atomic action, suggesting that \texttt{STM} would make it simple to group database operations into transactions \cite{harris}. 
 
-The fact that \texttt{TVar}s hold pointers to data structures in memory informed our choice to implement an in-memory database. In-memory databases are fast (since they obviate the need for slow disk seeks and writes), useful for small applications whose data can be held in memory, and gaining in popularity as memory becomes cheaper. One example of a popular in-memory database is Redis, a key-value store that can store more data types that are more complex than traditional SQL types \cite{redis}. In contrast, we chose to implement a fairly traditional relational database, primarily because we wanted to write a database that could be swapped in for any of the most popular databases (e.g., Oracle, MySQL, PostgreSQL). 
+The fact that \texttt{TVar}s hold pointers to data structures in memory informed our choice to implement an in-memory database. In-memory databases are fast (since they obviate the need for slow disk seeks and writes), useful for small applications whose data can be held in memory, and gaining in popularity as memory becomes cheaper. One example of a popular in-memory database is Redis, a key-value store that can store data types that are more complex than traditional SQL types \cite{redis}. In contrast, we chose to implement a fairly traditional relational database, primarily because we wanted to write a database that could be swapped in for any of the most popular databases (e.g., Oracle, MySQL, PostgreSQL). 
 
 \section{Database Operations}
 \subsection{Supported Syntax}
@@ -26,7 +26,7 @@ The database operations that we support are \texttt{CREATE TABLE}, \texttt{DROP 
 \begin{itemize}
 	\item Each individual command must go on one line.
 	\item The list of supported types is \verb+integer+, \verb+boolean+, \verb+real+, \verb+char(+$n$\verb+)+ (which denotes an array of characters), and \verb+bit(+$n$\verb+)+ (a bit array).
-	\item For \texttt{CREATE TABLE}, the syntax is \texttt{CREATE TABLE} $\mathit{tablename}$ \verb+(+$\mathit{fieldname}_1$ $\mathit{type}_1$\verb+,+ \dots{} $\mathit{fieldname}_n$ $\mathit{type}_n$\verb+)+. Each type name should be one of the above specified names, and each fieldname should have no spaces or parentheses in it. One of the typenames may be instead \texttt{PRIMARY KEY}.
+	\item For \texttt{CREATE TABLE}, the syntax is \texttt{CREATE TABLE} $\mathit{tablename}$ \verb+(+$\mathit{fieldname}_1$ $\mathit{type}_1$\verb+,+ \dots{} $\mathit{fieldname}_n$ $\mathit{type}_n$\verb+)+. Each type name should be one of the above specified names, and each fieldname should have no spaces or parentheses in it. In addition, one of the types may be followed by \texttt{PRIMARY KEY}.
 	\item For \texttt{DROP TABLE}, the syntax is \verb+DROP TABLE+ \textit{tablename}. The given tablename should not contain spaces.
 	\item For \texttt{ALTER TABLE}, there are two choices.
 	\begin{itemize}
@@ -42,7 +42,7 @@ The database operations that we support are \texttt{CREATE TABLE}, \texttt{DROP 
 	That is, they must follow the following context-free grammar. Here, $\mathit{name}_1$ and $\mathit{name}_2$ denote column names or constants of the corresponding type, and $\mathit{op}$ is one of \verb+>+, \verb+<+, \verb+>=+, \verb+<=+, \verb+==+, \verb+in+, and \verb+contains+.
 	\begin{align*}
 		P &\to \mathit{name}_1\ \mathit{op}\ \mathit{name}_2\\
-		Q &\to (Q) \mid P \mid P\text{ \texttt{and} } P\mid P\text{ \texttt{or} } P
+		Q &\to (Q) \mid P \mid Q\text{ \texttt{and} } Q\mid Q\text{ \texttt{or} } Q
 	\end{align*}
 	Then, a valid condition is represented by $Q$.
 	\item For \texttt{INSERT}, the syntax is \texttt{INSERT INTO} \textit{tablename} \texttt{VALUES} \textit{values}, where \textit{values} should be a list separated by commas (spaces are allowed) corresponding to an entire new row (i.e. they should correspond to the types of the corresponding columns).
@@ -51,41 +51,22 @@ The database operations that we support are \texttt{CREATE TABLE}, \texttt{DROP 
 	\item For \texttt{DELETE}, the syntax is \texttt{DELETE FROM} \textit{tablename} \texttt{WHERE} \textit{conditions}, where the conditions are as for a \verb+SELECT+ call.
 \end{itemize}
 \subsection{Implementation}
-Each operation is implemented as a Haskell function.  Operations which make changes to the database, should they succeed, should return lists of \texttt{LogOperation}s, where the \texttt{LogOperation} datatype represents log entries and we use different constructors for different types of entries (see durability section below for further discussion). Since we cannot perform IO from within STM, the calling function is responsible for actually writing these \texttt{LogOperation}s, which are instances of \texttt{Read} and \texttt{Show} to allow for easy serializability and de-serializability, to the in-memory log. If the operation was malformed (for example, the referenced table does not exist, or the user failed to specify the value for a column for which there is no default value), then we return some error message to the user. For operations such as \texttt{SELECT} that do not modify the database, we return a \texttt{String} that can be written back to the user. (It is interesting to note that while being forced to return everything that needs to be written to the log resulted in some cumbersome type signatures, 
-Haskell's explicit separation of pure and impure computations is also essentially what makes a safe implementation of \texttt{STM} possible; because all computation done within \texttt{STM} is effectless, there is no danger of performing an action with side-effects multiple times as the transaction is retried. In the context of our database, there is no danger of writing the same \texttt{LogOperation} to the log multiple times.)
+Each operation is implemented as a Haskell function.  Operations which make changes to the database, should they succeed, should return lists of \texttt{LogOperation}s, where the \texttt{LogOperation} datatype represents log entries and we use different constructors for different types of entries (see durability section below for further discussion). Since we cannot perform IO from within STM, the calling function is responsible for actually writing these \texttt{LogOperation}s, which are instances of \texttt{Read} and \texttt{Show} to allow for easy serializability and de-serializability, to the in-memory log. If the operation was malformed (for example, the referenced table does not exist, or the user failed to specify the value for a column for which there is no default value), then we return some error message to the user. For operations such as \texttt{SELECT} that do not modify the database, we return a \texttt{String} that can be written back to the user. 
+
+It is interesting to note that while being forced to return everything that needs to be written to the log resulted in some cumbersome type signatures, 
+Haskell's explicit separation of pure and impure computations is also essentially what makes a safe implementation of \texttt{STM} possible; because all computation done within \texttt{STM} is effectless, there is no danger of performing an action with side-effects multiple times as the transaction is retried. In the context of our database, there is no danger of writing the same \texttt{LogOperation} to the log multiple times.
 
 In our Haskell implementation of \texttt{SELECT}, we choose to return a \texttt{Table} rather than a \texttt{String} because while we did not implement this functionality in this verison of HiDb, in theory could we perform futher operations involving the returned table. We also chose to make use of a \texttt{Row} datatype, which is a wrapper around a \texttt{Fieldname -> Maybe Element} function. This allows us to use functions of the type \texttt{Row -> STM(Bool)} as the condition for whether a row of a table should be deleted or updated. It also allows us to express an update as \texttt{Row -> Row}. 
 
 One interesting implication of implementing these operations in Haskell is that the laziness of the language essentially makes our transactions lazy as well; the \texttt{IO} actions are not evaluated until we attempt to write the corresponding \texttt{LogOperation}s, until we attempt to write the results back to the user (i.e., the string resulting from a \texttt{SELECT}), or until another transaction does something that requires thunks from the earlier transaction to be evaluated.
-\section{Storage: Data Structures}
-\noindent\begin{minipage}{.45\textwidth}
-\begin{lstlisting}[caption=The data structures used to build up a table.,frame=tlrb, breaklines=true]
-data Database = Database { database :: Map Tablename (TVar Table) }
-
-data Table 
-  = Table { rowCounter :: Int 
-              , primaryKey :: Maybe Fieldname 
-              , table :: Map Fieldname Column
-              }
-
-data Column 
-  = Column { default_val :: Maybe Element
-           , col_type :: TypeRep
-           , column :: TVar(Map RowHash (TVar Element))
-           } 
-
-data Element = forall a. (Show a, Ord a, Eq a, Read a, Typeable a) => 
-  Element (Maybe a) -- Nothing here means that it's null
-\end{lstlisting}
-\end{minipage}\hfill
-
-Note that we needed to use the \texttt{Existential Quantification} language extension in our definition of \texttt{Element}, which allows us to put any type that is an instance of \texttt{Show}, \texttt{Ord}, \texttt{Eq}, \texttt{Read}, and \texttt{Typeable}.  Note that this means that we do not statically enforce the fact that every column should contain elements of just one type. It seems that it is not possible to statically enforce this in Haskell, since when the user attempts an insert, there is no way to know statically (since the user only provides the input at runtime) whether this input will be of the same type as the other elements in the column. We therefore must enforce the type of columns at run-time (specifically, in the parsing stage, which will be discussed later in the paper) by keeping track of one \texttt{TypeRep} per column. 
-
-We use multiple layers of \texttt{Tvar}s in order to allow operations that touch different parts of the database to proceed at the same time. For example, having each \texttt{Table} be stored in a \texttt{Tvar} means that if client $A$ updates a row in one table, client $B$ can concurrently update a row in another table. Moreover, consider what happens if we attempt changes that affect the database at different levels of granularity: Suppose we concurrently attempt two operations, $O_1$ and $O_2$, where $O_1$ is the insertion of a new column into a table and $O_2$ is the updating of a value in an existing column in the same table. If $O_1$ completes first, then $O_2$ will have to be retried because the pointer (which had to be read for $O_2$ to occur) in the \texttt{Tvar} surrounding the \texttt{Table} type will have changed. However, if $O_2$ completes first, then $O_1$ will complete without issue because the only \texttt{Tvar} that $O_2$ changed are ones that did not need to be read for $O_1$. 
-
-
 \section{Parsing}
 \input{parsing}
+\section{Storage: Data Structures}
+\lstinputlisting[caption=Main data structures for the database.]{lsting2.tex}
+Note that we needed to use the \texttt{Existential Quantification} language extension in our definition of \texttt{Element}, which allows us to put any type that is an instance of \texttt{Show}, \texttt{Ord}, \texttt{Eq}, \texttt{Read}, and \texttt{Typeable}.  Note that this means that we do not statically enforce the fact that every column should contain elements of just one type. It seems that it is not possible to statically enforce this in Haskell, since when the user attempts an insert, there is no way to know statically (since the user only provides the input at runtime) whether this input will be of the same type as the other elements in the column. We therefore must enforce the type of columns at run-time (specifically, in the parsing stage) by keeping track of one \texttt{TypeRep} per column. 
+
+We use multiple layers of \texttt{TVar}s in order to allow operations that touch different parts of the database to proceed at the same time. For example, having each \texttt{Table} be stored in a \texttt{TVar} means that if client $A$ updates a row in one table, client $B$ can concurrently update a row in another table. Moreover, consider what happens if we attempt changes that affect the database at different levels of granularity: Suppose we concurrently attempt two operations, $O_1$ and $O_2$, where $O_1$ is the insertion of a new column into a table and $O_2$ is the updating of a value in an existing column in the same table. If $O_1$ completes first, then $O_2$ will have to be retried because the pointer (which had to be read for $O_2$ to occur) in the \texttt{TVar} surrounding the \texttt{Table} type will have changed. However, if $O_2$ completes first, then $O_1$ will complete without issue because the only \texttt{TVar} that $O_2$ changed are ones that did not need to be read for $O_1$. 
+
 \section{Durability}
 Almost by definition, a database needs to maintain its stored data between sessions; a crash cannot erase all of the data. As such we cannot rely solely on in-memory storage. We must push our database to disk periodically to ensure that we have a relatively recent and persistent copy of our data at all times. We call these periodic pushes \textit{checkpoints}.
 
@@ -107,16 +88,16 @@ Since we couldn't use automatically derived instances of \texttt{show} and \text
 The last problem with respect to serialization is serializing the existentially quantified data structure \texttt{Element}. We must know the type of the element stored in the \texttt{Element} if we want to \texttt{read} it. As we only use three different types in our database, we simply prepend the type in \texttt{show} and then check the prefix to identify the type during \texttt{read}. We use a similar procedure to serialize the types of a column (stored as a \texttt{TypeRep}).
 
 \section{Summary \& Future Work}
-We found that Haskell's support for lightweight threads and the \texttt{STM} module were, as expected, very well-suited to database implementation. However, we also need dynamic types, which difficult to program with given Haskell's unusually strong type system. Furthermore, we found it difficult to implement the Operation module cleanly; the code indeed appears quite imperative due the constant use of \texttt{do} notation (which we could have replaced with \texttt{>>=}, but we do not believe that would have made the code any easier to read). 
+We found that Haskell's support for lightweight threads and the \texttt{STM} module were, as expected, very well-suited to database implementation. However, we also need dynamic types, which presents difficulties given Haskell's unusually strong type system. Furthermore, we found it difficult to implement the Operation module cleanly; the code indeed appears quite imperative due the constant use of \texttt{do} notation (which we could have replaced with \texttt{>>=}, but we do not believe that would have made the code any easier to read). 
 
-Given that we were unable to complete the parser and were ultimately only able to test the operations and the serialization and the deserialization of the database, logical next steps would be to complete the parser and to make it more robust. After that, implementing operations such as \texttt{INNER JOIN}, specifications such as \texttt{FOREIGN KEY}, just generally fleshing out our implementation to include the full set of traditional SQL operations would be a logical next step. Another logical direction of exploration would be to compare the performance of this database to the relational databases whose functionality we tried to emulate.
-
+Given that we were unable to complete the parser and were ultimately only able to test the operations and the serialization and the deserialization of the database, logical next steps would be to complete the parser and to make it more robust. After that, implementing operations such as \texttt{INNER JOIN}, specifications such as \texttt{FOREIGN KEY}, and just generally fleshing out our implementation to include the full set of traditional SQL operations would be a logical next step. Another logical direction of exploration would be to compare the performance of this database to the relational databases whose functionality we tried to emulate.\\\\
+\textit{Code is available at \url{https://github.com/susanctu/Haskell-In-Memory-DB/}. Tests verifying that operations and rehydration work are in \texttt{Main.hs}.}
 \end{multicols}
 
 \begin{thebibliography}{1}
 
-\bibitem{harris} \url{http://research.microsoft.com/pubs/67418/2005-ppopp-composable.pdf}
-\bibitem{redis} \url{http://redis.io/}
+\bibitem{harris} Harris T., Marlow S. Jones S., Herlihy M. "Composable Memory Transactions". \url{http://research.microsoft.com/pubs/67418/2005-ppopp-composable.pdf}
+\bibitem{redis} Redis. \url{http://redis.io/}
 
 \end{thebibliography}
 \end{document}

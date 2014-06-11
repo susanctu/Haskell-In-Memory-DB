@@ -16,13 +16,12 @@ library
     Operation,
     DBTypes,
     DBUtils,
-    DiskManager,
-    Client
+    DiskManager
   build-depends:
     base < 5
     ,stm > 2.4
     ,containers
-    , QuickCheck > 2.7
+    ,QuickCheck > 2.7
     ,network
     ,random
     ,split -any
@@ -40,16 +39,4 @@ executable hidb
     , hidb
     , containers
     , stm > 2.4
-  ghc-options: -Wall
-
-test-suite test-operation
-  type: exitcode-stdio-1.0
-  main-is: TestOperation.hs
-  build-depends:
-    base < 5
-    , hidb
-    , containers
-    , stm > 2.4
-    , QuickCheck > 2.7
-    , hspec
   ghc-options: -Wall

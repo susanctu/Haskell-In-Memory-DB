@@ -67,7 +67,7 @@ consume_log l active = do flag <- should_consume l active
                                                   _                     -> return True
 
 run_checkpoint :: TVar Database -> Log -> TVar ActiveTransactions -> IO ()
-run_checkpoint db l active = do threadDelay 3 --thirty seconds
+run_checkpoint db l active = do threadDelay 30000000 --thirty seconds
                                 flush_log l
                                 (unwrapped_db, unwrapped_active) <- atomically $ do a <- readTVar db
                                                                                     b <- readTVar active
@@ -139,5 +139,3 @@ start_db = do db <- hydrate
               --forkIO $ run_server
               forkIO $ run_checkpoint db l active
               return ()
-
-main = start_db
