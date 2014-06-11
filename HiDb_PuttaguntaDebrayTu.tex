@@ -53,8 +53,8 @@ The database operations that we support are \texttt{CREATE TABLE}, \texttt{DROP 
 \subsection{Implementation}
 Each operation is implemented as a Haskell function.  Operations which make changes to the database, should they succeed, should return lists of \texttt{LogOperation}s, where the \texttt{LogOperation} datatype represents log entries and we use different constructors for different types of entries (see table x). Since we cannot perform IO from within STM, the calling function is responsible for actually writing these \texttt{LogOperation}s, which are instances of \texttt{Read} and \texttt{Show} to allow for easy serializability and de-serializability, to the in-memory log. If the operation was malformed (for example, the referenced table does not exist, or the user failed to specify the value for a column for which there is no default value), then we return some error message to the user. For operations such as \texttt{SELECT} that do not modify the database, we return a string that can be written back to the user. (It is interesting to note that while being forced to return everything that needs to be written to the log resulted in some cumbersome type signatures, 
 Haskell's explicit separation of pure and impure computations is also essentially what makes a safe implementation of \texttt{STM} possible; because all computation done within \texttt{STM} is effectless, there is no danger of performing an action with side-effects multiple times as the transaction is retried. In the context of our database, there is no danger of writing the same \texttt{LogOperation} to the log multiple times.) \\\\
-In our Haskell implementation of \texttt{SELECT}, we choose to return a \texttt{Table} rather than a \texttt{String} because while we did not implement this functionality in this verison of HiDb, in theory we perform futher operations involving the returned table. We also chose to make use of a \texttt{Row} datatype, which is a wrapper around a \texttt{Fieldname -> Maybe Element} function. This allows us to use functions of the type \texttt{Row -> STM(Bool)} as the condition for whether a row of a table should be deleted or updated. It also allows us to express an update as \texttt{Row -> Row}. 
-
+In our Haskell implementation of \texttt{SELECT}, we choose to return a \texttt{Table} rather than a \texttt{String} because while we did not implement this functionality in this verison of HiDb, in theory we perform futher operations involving the returned table. We also chose to make use of a \texttt{Row} datatype, which is a wrapper around a \texttt{Fieldname -> Maybe Element} function. This allows us to use functions of the type \texttt{Row -> STM(Bool)} as the condition for whether a row of a table should be deleted or updated. It also allows us to express an update as \texttt{Row -> Row}. \\
+One interesting implication of implementing these features in Haskell is that the laziness of the language essentially makes our transactions lazy as well; the \texttt{IO} actions are not evaluated until we attempt to write the corresponding \texttt{LogOperation}s, until we attempt to write the results back to the user (i.e., the string resulting from a \texttt{SELECT}), or until another transaction does something that requires thunks from the earlier transaction to be evaluated.
 \section{Storage: Data Structures}
 
 \noindent\begin{minipage}{.45\textwidth}
@@ -87,11 +87,10 @@ We use multiple layers of \texttt{Tvar}s in order to allow operations that touch
 \input{parsing}
 \section{Durability}
 
-\section{Summary}
+\section{Summary \& Future Work}
+We found that Haskell's support for lightweight threads and the \texttt{STM} module were, as expected, very well-suited to database implementation. However, we also need dynamic types, which difficult to program with given Haskell's unusually strong type system. Furthermore, we found it difficult to implement the Operation module cleanly; the code indeed appears quite imperative due the constant use of \texttt{do} notation (which we could have replaced with \texttt{>>=}, but we do not believe that would have made the code any easier to read). 
 
-\section{Future Work}
-
-Implementing operations such as \texttt{INNER JOIN}, specifications such as \texttt{FOREIGN KEY}, just generally fleshing out our implementation to include the full set of traditional SQL operations would be a logical next step. Another logical direction of exploration would be to compare the performance of this database to. 
+Given that we were unable to complete the parser and were ultimately only able to test the operations and the serialization and the deserialization of the database, logical next steps would be to complete the parser and to make it more robust. After that, implementing operations such as \texttt{INNER JOIN}, specifications such as \texttt{FOREIGN KEY}, just generally fleshing out our implementation to include the full set of traditional SQL operations would be a logical next step. Another logical direction of exploration would be to compare the performance of this database to the relational databases whose functionality we tried to emulate.
 
 \end{multicols}
 
