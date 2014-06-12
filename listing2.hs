@@ -1,5 +1,3 @@
--- for the definition of atomicAction, see the next listing.
-
 executeRequests :: TVar Database -> TVar ActiveTransactions -> Log -> TransactionID -> [String] -> IO (Maybe ErrString)
 -- base case
 executeRequests _ _ _ _ [] = return Nothing
